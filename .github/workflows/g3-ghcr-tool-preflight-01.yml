@@ -1,0 +1,38 @@
+# INACTIVE LOCAL CANDIDATE: install/run only after exact Founder approval.
+name: G3 GHCR tool preflight 01
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: g3-ghcr-tool-preflight-01
+  cancel-in-progress: false
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'Eight6Admin/eight6-g3-dummy-01' &&
+      github.actor == 'Eight6Admin' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_number == 1 && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Record only non-secret managed importer metadata
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          test "$GITHUB_RUN_NUMBER" = 1
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "${ImageVersion:-}" =~ ^[0-9]{8}\.[0-9]+\.[0-9]+$ ]]
+          tool="$(command -v skopeo)"
+          test "$tool" = /usr/bin/skopeo
+          version="$(/usr/bin/skopeo --version)"
+          [[ "$version" =~ ^skopeo\ version\ [0-9.]+$ ]]
+          printf 'SCHEMA=G3_GHCR_TOOL_PREFLIGHT_V1\n'
+          printf 'IMAGE_VERSION=%s\n' "$ImageVersion"
+          printf 'SCOPE=NO_TOKEN_VALUE_READ_NO_REGISTRY_OPERATION\n'
+          printf 'TOOL_VERSION=%s\n' "$version"
+          /usr/bin/sha256sum -- /usr/bin/skopeo /usr/bin/python3 /usr/bin/bash /usr/bin/curl
+          printf 'RESULT=METADATA_RECORDED_INDEPENDENT_REVIEW_REQUIRED\n'
