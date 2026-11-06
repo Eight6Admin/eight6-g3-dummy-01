@@ -1,0 +1,335 @@
+# INACTIVE REVIEW CANDIDATE. No installation, token use or execution authorised.
+name: G3 exact frozen OCI publication 01
+on:
+  workflow_dispatch:
+    inputs:
+      publication_release:
+        description: Exact independently reviewed finite release JSON, after Founder approval
+        required: true
+        type: string
+      publication_release_sha256:
+        description: Exact independently confirmed release hash
+        required: true
+        type: string
+      reviewed_workflow_sha256:
+        description: Exact installed source hash independently confirmed before dispatch
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: g3-exact-ghcr-publication-01
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: >-
+      github.repository == 'Eight6Admin/eight6-g3-dummy-01' &&
+      github.actor == 'Eight6Admin' && github.ref == 'refs/heads/main' &&
+      github.run_number == 1 && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    env:
+      PUBLICATION_RELEASE: ${{ inputs.publication_release }}
+      PUBLICATION_RELEASE_SHA256: ${{ inputs.publication_release_sha256 }}
+      REVIEWED_WORKFLOW_SHA256: ${{ inputs.reviewed_workflow_sha256 }}
+    steps:
+      - name: Validate public source, finite release, toolchain and exact archive
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          umask 077
+          cat > "$RUNNER_TEMP/e6-ghcr-publisher.py" <<'E6_APPROVED_PYTHON'
+          """INACTIVE candidate. No execution authority; real credentials are prohibited now.
+          Only the future approved GitHub job may call prepare/publish. Tests use doubles.
+          """
+          import base64, datetime as dt, hashlib, json, os, re, shutil, signal, ssl
+          import stat, subprocess, sys, tarfile, tempfile, time, urllib.error, urllib.request
+          import contextlib, selectors
+          from pathlib import Path
+          
+          REPO='Eight6Admin/eight6-g3-dummy-01'
+          NAME='eight6admin/eight6-g3-dummy-01'
+          IMAGE='sha256:ddac54564d21a1cb2519a34c8b79e6de2bdea11536b69add3b136463aea6dd7d'
+          ARCHIVE_SHA='14A1C05B5B243FB523404CBECC7D08725C1C14FC5D491A9BF5E79C420B731BDA'
+          ARCHIVE_SIZE=86446080
+          ASSET_URL='https://github.com/'+REPO+'/releases/download/g3-dummy-oci-01/starter-dummy.oci.tar'
+          TOOLS={'/usr/bin/skopeo':'1802F4706BB0F3F5A7A43E61C6ECEF2ADCFFF567D454EB0052AEB5769885302C',
+           '/usr/bin/python3':'E50D468E8B0ADFB05733F5B87B3CFF34829C4A8C1AEA50C865AA8BDFE4BB150F',
+           '/usr/bin/bash':'BC5945FEB8BD26203EBFAFEA5CE1878BB2E32CB8FB50AB7AE395CFB1E1AAAEF1',
+           '/usr/bin/curl':'1CCBD3DAE948374BA8EEF1EBDA26C64B783EDE50B463196E53666E0880BDAC60'}
+          BLOBS={'sha256:3707f346abd105dff303edcb9c87b047cdfa398477b99f38ed0824f15d4fec2a':509,
+           'sha256:dd051e1b8c92ff101fa3071ab97ea4924885942f15644e01c3dc095764e863e3':28247982,
+           'sha256:634001330353172b42cc083a51478b1a55d949986fa9ecd18c24c13bb190d065':58179132,
+           'sha256:1809fa5fb190df46a4c3b8af2e403f81c915e219d388b73d0d0f7b19180c4336':3152, IMAGE:720}
+          UTC=dt.timezone.utc
+          class Stop(Exception):pass
+          def need(ok,code):
+           if not ok:raise Stop(code)
+          def digest(data):return hashlib.sha256(data).hexdigest().upper()
+          def filehash(p):
+           h=hashlib.sha256()
+           with open(p,'rb') as f:
+            for b in iter(lambda:f.read(1048576),b''):h.update(b)
+           return h.hexdigest().upper()
+          def pairs(rows):
+           d={}
+           for k,v in rows:
+            need(k not in d,'DUPLICATE_JSON_KEY');d[k]=v
+           return d
+          def loads(raw):return json.loads(raw,object_pairs_hook=pairs)
+          def utc(s):
+           need(type(s)is str and re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ',s),'WINDOW_FORMAT')
+           return dt.datetime.strptime(s,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
+          def gate(r,now=None):
+           now=now or dt.datetime.now(UTC)
+           need(utc(r['start'])<=now<utc(r['expiry']),'OUTSIDE_FIXED_WINDOW')
+          @contextlib.contextmanager
+          def hard_deadline(r,seconds):
+           # Native Linux default SIGALRM terminates THIS Python process even if an HTTP
+           # peer drips headers/body indefinitely. No parent/group/unrelated PID is killed.
+           # Abrupt termination is NOT success; the independent always-step must reconcile
+           # recorded upload boundary and cleanup. No finally/secure-erasure claim on kill.
+           need(sys.platform=='linux' and signal.getitimer(signal.ITIMER_REAL)==(0.0,0.0),'NATIVE_DEADLINE_REQUIRED')
+           remaining=min(seconds,(utc(r['expiry'])-dt.datetime.now(UTC)).total_seconds())
+           need(remaining>0,'HTTP_EXPIRY')
+           previous=signal.signal(signal.SIGALRM,signal.SIG_DFL)
+           signal.setitimer(signal.ITIMER_REAL,remaining)
+           try:yield
+           finally:
+            signal.setitimer(signal.ITIMER_REAL,0);signal.signal(signal.SIGALRM,previous)
+          def validate_release(raw,expected,env,now=None):
+           need(re.fullmatch('[A-F0-9]{64}',expected or '') and digest(raw.encode())==expected,'RELEASE_HASH')
+           r=loads(raw)
+           keys={'schema','attempt','repo','actor','commit','workflow_sha256','run_number','run_attempt','start','expiry','archive_url','archive_sha256','image_digest','tag','credential_exception','exclusive_writer','approval_sha256','independent_review_sha256','public_content_review_sha256','intent_sha256'}
+           need(type(r)is dict and set(r)==keys,'RELEASE_SHAPE')
+           need(type(r['schema'])is int and r['schema']==1 and r['attempt']=='PHASE3C2_GHCR_IMPORT_01','ATTEMPT')
+           need(r['repo']==REPO and r['actor']=='Eight6Admin','REPOSITORY_ACTOR')
+           need(type(r['run_number'])is int and r['run_number']==1 and type(r['run_attempt'])is int and r['run_attempt']==1,'ONE_FIRST_ATTEMPT')
+           need(re.fullmatch('[0-9a-f]{40}',r['commit']) is not None,'COMMIT')
+           need(r['workflow_sha256']==env.get('REVIEWED_WORKFLOW_SHA256'),'WORKFLOW_HASH')
+           need(r['public_content_review_sha256']=='8AAD1A313A8F0737D310926892E5DD0817B93032F741AA80CE4CA4C7E752DE55','PUBLIC_CONTENT_REVIEW')
+           for k in ['workflow_sha256','approval_sha256','independent_review_sha256','intent_sha256']:
+            need(type(r[k])is str and re.fullmatch('[A-F0-9]{64}',r[k]) and len(set(r[k]))>1,'AUTHORITY_BINDING')
+           need(r['exclusive_writer'] is True and r['credential_exception']=='ONE_JOB_ENV_STDIN_TMPFS_AND_GHCR_READ_TOKEN_EXCHANGE','EXCEPTION_OR_QUIET_WINDOW')
+           need(r['archive_url']==ASSET_URL and r['archive_sha256']==ARCHIVE_SHA and r['image_digest']==IMAGE,'IMAGE_BINDING')
+           need(re.fullmatch(r'g3-import-run-1-[0-9a-f]{16}',r['tag']) is not None,'UNIQUE_TAG')
+           need(0<(utc(r['expiry'])-utc(r['start'])).total_seconds()<=14400,'MAXIMUM_FOUR_HOURS')
+           for k,v in {'GITHUB_REPOSITORY':REPO,'GITHUB_ACTOR':'Eight6Admin','GITHUB_REF':'refs/heads/main','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_NUMBER':'1','GITHUB_RUN_ATTEMPT':'1','GITHUB_SHA':r['commit'],'GITHUB_WORKFLOW_SHA':r['commit'],'RUNNER_OS':'Linux','RUNNER_ARCH':'X64','ImageVersion':'20261101.360.1'}.items():
+            need(env.get(k)==v,'CONTEXT_'+k)
+           gate(r,now);return r
+          def toolcheck():
+           for p,h in TOOLS.items():need(filehash(p)==h,'TOOL_HASH')
+           need(shutil.which('skopeo')=='/usr/bin/skopeo','TOOL_PATH')
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+           def redirect_request(self,*a,**kw):raise Stop('REGISTRY_REDIRECT')
+          class AssetRedirect(urllib.request.HTTPRedirectHandler):
+           def redirect_request(self,req,fp,code,msg,headers,url):
+            from urllib.parse import urlsplit
+            u=urlsplit(url)
+            need(u.scheme=='https' and u.hostname in {'github.com','release-assets.githubusercontent.com','objects.githubusercontent.com'} and not u.username and not u.password and u.port in (None,443),'ASSET_REDIRECT')
+            return super().redirect_request(req,fp,code,msg,headers,url)
+          def opener(redirect):return urllib.request.build_opener(urllib.request.ProxyHandler({}),redirect,urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+          def download(path,r):
+           deadline=time.monotonic()+240
+           with hard_deadline(r,240),opener(AssetRedirect()).open(ASSET_URL,timeout=20) as response, open(path,'xb') as out:
+            need(response.status==200,'ASSET_STATUS');n=0
+            while True:
+             gate(r);need(time.monotonic()<deadline,'ASSET_DEADLINE')
+             b=response.read(1048576)
+             if not b:break
+             n+=len(b);need(n<=ARCHIVE_SIZE,'ASSET_OVERSIZE');out.write(b)
+           need(n==ARCHIVE_SIZE and filehash(path)==ARCHIVE_SHA,'ARCHIVE_BYTES')
+          def verify_archive(path):
+           need(Path(path).stat().st_size==ARCHIVE_SIZE and filehash(path)==ARCHIVE_SHA,'ARCHIVE_BYTES')
+           with tarfile.open(path,'r:') as t:
+            names=t.getnames();need(len(names)==len(set(names)),'ARCHIVE_DUPLICATES')
+            want={'oci-layout','index.json'}|{'blobs/sha256/'+d.split(':')[1] for d in BLOBS}
+            need(set(names)==want,'ARCHIVE_INVENTORY')
+            for name in names:need(t.getmember(name).isfile(),'ARCHIVE_MEMBER_TYPE')
+            idx=loads(t.extractfile('index.json').read())
+            need(len(idx['manifests'])==1 and idx['manifests'][0]['digest']==IMAGE,'SINGLE_MANIFEST')
+            for d,size in BLOBS.items():
+             b=t.extractfile('blobs/sha256/'+d.split(':')[1]).read(size+1)
+             need(len(b)==size and 'sha256:'+digest(b).lower()==d,'SOURCE_BLOB')
+          def child(argv,env,r,stdin=None,seconds=120):
+           gate(r);seconds=min(seconds,(utc(r['expiry'])-dt.datetime.now(UTC)).total_seconds())
+           need(seconds>0,'CHILD_EXPIRY')
+           p=subprocess.Popen(argv,stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,start_new_session=True)
+           deadline=time.monotonic()+seconds;out=bytearray();err=bytearray();offset=0
+           sel=None
+           try:
+            sel=selectors.DefaultSelector()
+            for stream,kind in [(p.stdout,'out'),(p.stderr,'err')]:os.set_blocking(stream.fileno(),False);sel.register(stream,selectors.EVENT_READ,kind)
+            if stdin is not None:os.set_blocking(p.stdin.fileno(),False);sel.register(p.stdin,selectors.EVENT_WRITE,'in')
+            while sel.get_map():
+             left=deadline-time.monotonic();need(left>0,'CHILD_ABSOLUTE_DEADLINE')
+             for key,_ in sel.select(min(left,0.25)):
+              if key.data=='in':
+               offset+=os.write(key.fileobj.fileno(),stdin[offset:])
+               if offset==len(stdin):sel.unregister(key.fileobj);key.fileobj.close()
+              else:
+               chunk=os.read(key.fileobj.fileno(),65536)
+               if not chunk:sel.unregister(key.fileobj);key.fileobj.close();continue
+               need(len(out)+len(err)+len(chunk)<=2097152,'TOOL_OUTPUT_OVERSIZE')
+               (out if key.data=='out' else err).extend(chunk)
+            p.wait(timeout=max(0.001,deadline-time.monotonic()))
+           except BaseException:
+            try:os.killpg(p.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+            p.wait(timeout=2);raise Stop('CHILD_TIMEOUT_OUTPUT_OR_CLOSURE_UNKNOWN')
+           finally:
+            if sel is not None:sel.close()
+            for stream in [p.stdin,p.stdout,p.stderr]:
+             if stream is not None and not stream.closed:stream.close()
+           gate(r);need(p.returncode==0,'TOOL_FAILURE');return bytes(out)
+          def http(path,headers,r,limit=65536):
+           gate(r);req=urllib.request.Request('https://ghcr.io'+path,headers=headers)
+           with hard_deadline(r,20):
+            try:
+             with opener(NoRedirect()).open(req,timeout=20) as response:result=(response.status,dict(response.headers),response.read(limit+1))
+            except urllib.error.HTTPError as e:result=(e.code,dict(e.headers),e.read(limit+1))
+           gate(r);need(len(result[2])<=limit,'REGISTRY_RESPONSE_OVERSIZE');return result
+          def bearer_for_read(token,r):
+           # Proposed extra narrow read-auth exchange; credential header only to fixed GHCR HTTPS endpoint.
+           basic=base64.b64encode(('Eight6Admin:'+token).encode()).decode()
+           status,headers,body=http('/token?service=ghcr.io&scope=repository%3A'+NAME.replace('/','%2F')+'%3Apull',{'Authorization':'Basic '+basic},r)
+           need(status==200,'REGISTRY_READ_AUTH_FAILED');reply=loads(body)
+           bearer=reply.get('token',reply.get('access_token'))
+           need(type(bearer)is str and 10<len(bearer)<32768 and not re.search(r'[\r\n]',bearer),'REGISTRY_READ_TOKEN')
+           return bearer
+          def absence(status,body,code):
+           need(status==404,'DESTINATION_NOT_ABSENT')
+           obj=loads(body)
+           need(type(obj)is dict and set(obj)=={'errors'} and type(obj['errors'])is list and len(obj['errors'])==1,'ABSENCE_RESPONSE_SHAPE')
+           err=obj['errors'][0]
+           need(type(err)is dict and err.get('code')==code and set(err)<= {'code','message','detail'},'ABSENCE_NOT_RECOGNISED')
+          def check_absent(bearer,r):
+           h={'Authorization':'Bearer '+bearer,'Accept':'application/vnd.oci.image.manifest.v1+json'}
+           status,_,body=http('/v2/'+NAME+'/tags/list',h,r)
+           # Do not adopt an existing package. Fresh package absence required, not just fresh-tag absence.
+           absence(status,body,'NAME_UNKNOWN')
+           status,_,body=http('/v2/'+NAME+'/manifests/'+r['tag'],h,r)
+           absence(status,body,'MANIFEST_UNKNOWN')
+          def remote_manifest(bearer,r):
+           status,_,body=http('/v2/'+NAME+'/manifests/'+IMAGE,{'Authorization':'Bearer '+bearer,'Accept':'application/vnd.oci.image.manifest.v1+json'},r,1048576)
+           need(status==200 and 'sha256:'+digest(body).lower()==IMAGE,'REMOTE_RAW_MANIFEST')
+          def pulled_blobs(path):
+           b=Path(path)/'blobs/sha256'
+           need(b.is_dir() and {x.name for x in b.iterdir()}=={d.split(':')[1] for d in BLOBS},'REMOTE_BLOB_INVENTORY')
+           for d,size in BLOBS.items():
+            p=b/d.split(':')[1]
+            need(p.is_file() and not p.is_symlink() and p.stat().st_size==size and filehash(p)==d.split(':')[1].upper(),'REMOTE_BLOB_BYTES')
+          def ram_boundary(path):
+           mounts=Path('/proc/mounts').read_text().splitlines()
+           need(any(x.split()[1:3]==['/dev/shm','tmpfs'] for x in mounts),'TMPFS_REQUIRED')
+           s=os.lstat(path);need(stat.S_ISDIR(s.st_mode) and s.st_uid==os.getuid() and stat.S_IMODE(s.st_mode)==0o700,'RAM_DIRECTORY_BOUNDARY')
+          def auth_boundary(path):
+           s=os.lstat(path);need(stat.S_ISREG(s.st_mode) and s.st_uid==os.getuid() and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o600,'AUTHFILE_BOUNDARY')
+          def context():
+           r=validate_release(os.environ.get('PUBLICATION_RELEASE',''),os.environ.get('PUBLICATION_RELEASE_SHA256',''),os.environ)
+           toolcheck()
+           source='https://raw.githubusercontent.com/'+REPO+'/'+r['commit']+'/.github/workflows/g3-ghcr-publish-01.yml'
+           with hard_deadline(r,20),opener(NoRedirect()).open(source,timeout=20) as response:
+            need(response.status==200,'INSTALLED_WORKFLOW_STATUS');raw=response.read(131073)
+           need(len(raw)<=131072 and digest(raw)==r['workflow_sha256'],'INSTALLED_WORKFLOW_BYTES')
+           gate(r);return r
+          def workspace():
+           p=Path(os.environ['RUNNER_TEMP'])/'e6-ghcr-import-01'
+           need(p.is_dir() and not p.is_symlink() and p.stat().st_uid==os.getuid(),'WORKSPACE_BOUNDARY');return p
+          def prepare():
+           r=context();p=Path(os.environ['RUNNER_TEMP'])/'e6-ghcr-import-01'
+           p.mkdir(mode=0o700,exist_ok=False)
+           with (p/'one-use.claim').open('x') as f:f.write(os.environ['GITHUB_RUN_ID'])
+           download(p/'starter-dummy.oci.tar',r);verify_archive(p/'starter-dummy.oci.tar')
+           print('PREPARE=EXACT_ARCHIVE_TOOLS_CONTEXT_VERIFIED')
+          def publish():
+           # The job token exists only in this proposed credential-consuming step environment.
+           token=None
+           ram=None;mutated=False;verified=False;cleanup=False
+           try:
+            r=context();p=workspace();verify_archive(p/'starter-dummy.oci.tar')
+            need((p/'one-use.claim').read_text()==os.environ['GITHUB_RUN_ID'],'CLAIM_BINDING')
+            with (p/'publication-consumed.claim').open('x') as f:f.write(os.environ['GITHUB_RUN_ID'])
+            import resource
+            resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+            token=os.environ.pop('GH_PUBLISH_TOKEN',None)
+            need(type(token)is str and 10<len(token)<32768 and not re.search(r'[\r\n]',token),'TOKEN_INPUT')
+            os.umask(0o077);ram=Path(tempfile.mkdtemp(prefix='e6-ghcr-',dir='/dev/shm'));ram_boundary(ram)
+            (p/'ram-path').write_text(str(ram))
+            home=ram/'home';home.mkdir(mode=0o700);auth=ram/'auth.json'
+            env={'PATH':'/usr/bin:/bin','HOME':str(home),'XDG_CONFIG_HOME':str(home),'XDG_RUNTIME_DIR':str(home),'REGISTRY_AUTH_FILE':str(auth),'LANG':'C.UTF-8'}
+            version=child(['/usr/bin/skopeo','--version'],env,r,seconds=10)
+            need(version==b'skopeo version 1.13.3\n','TOOL_VERSION')
+            child(['/usr/bin/skopeo','login','--authfile',str(auth),'--username','Eight6Admin','--password-stdin','--tls-verify=true','ghcr.io'],env,r,token.encode(),30)
+            auth_boundary(auth);bearer=bearer_for_read(token,r);token=None
+            check_absent(bearer,r);gate(r)
+            # From this point any failure or lost acknowledgement is UNKNOWN; never retry/delete.
+            with (p/'upload-may-have-started.claim').open('x') as f:f.write(os.environ['GITHUB_RUN_ID'])
+            print('BOUNDARY=UPLOAD_MAY_BEGIN_ANY_UNVERIFIED_OUTCOME_IS_UNKNOWN',flush=True)
+            mutated=True
+            child(['/usr/bin/skopeo','copy','--preserve-digests','--retry-times','0','--dest-tls-verify=true','--dest-authfile',str(auth),'--digestfile',str(p/'uploaded.digest'),'oci-archive:'+str(p/'starter-dummy.oci.tar'),'docker://ghcr.io/'+NAME+':'+r['tag']],env,r,seconds=300)
+            need((p/'uploaded.digest').read_text().strip()==IMAGE,'UPLOAD_DIGESTFILE')
+            remote_manifest(bearer,r);bearer=None
+            child(['/usr/bin/skopeo','copy','--preserve-digests','--retry-times','0','--src-tls-verify=true','--src-authfile',str(auth),'docker://ghcr.io/'+NAME+'@'+IMAGE,'oci:'+str(p/'verified-pull')+':verified'],env,r,seconds=180)
+            pulled_blobs(p/'verified-pull');gate(r);verified=True
+           finally:
+            token=None;os.environ.pop('GH_PUBLISH_TOKEN',None)
+            try:
+             if ram is not None:shutil.rmtree(ram);need(not ram.exists(),'AUTH_CLEANUP_UNVERIFIED')
+             cleanup=True
+            finally:
+             # Even a cleanup exception after upload must retain the UNKNOWN boundary.
+             if not (verified and cleanup):print('OUTCOME=UNKNOWN_NO_RETRY' if mutated else 'OUTCOME=STOP_BEFORE_UPLOAD')
+           print('OUTCOME=AUTHENTICATED_MANIFEST_AND_ALL_BLOBS_MATCH_REVIEW_REQUIRED')
+           print('CLEANUP=TEMPORARY_AUTH_PATH_REMOVED_NOT_SECURE_ERASURE')
+           print('PUBLIC_VISIBILITY=NOT_VERIFIED_SEPARATE_GATE')
+          def cleanup():
+           # Always-step fallback, never scans/deletes arbitrary /dev/shm or unrelated paths.
+           p=workspace();marker=p/'ram-path'
+           if (p/'upload-may-have-started.claim').exists():print('UPLOAD_BOUNDARY=RECONCILE_NO_RETRY_NO_ROLLBACK_ASSUMPTION')
+           if marker.exists():
+            ram=Path(marker.read_text())
+            need(ram.parent==Path('/dev/shm') and re.fullmatch(r'e6-ghcr-[a-z0-9_]{8}',ram.name),'CLEANUP_PATH')
+            if ram.exists():ram_boundary(ram);shutil.rmtree(ram)
+            need(not ram.exists(),'AUTH_CLEANUP_UNVERIFIED')
+           print('CLEANUP=RECORDED_TEMPORARY_AUTH_PATH_ABSENT')
+          def anonymous():
+           # Separate future Founder operation, no release/publication progression from publish().
+           need(not any(k in os.environ for k in ['GH_PUBLISH_TOKEN','GITHUB_TOKEN','ACTIONS_RUNTIME_TOKEN']),'ANONYMOUS_CONTEXT_HAS_TOKEN')
+           toolcheck();r=context();p=workspace();ram=None
+           try:
+            os.umask(0o077);ram=Path(tempfile.mkdtemp(prefix='e6-anon-',dir='/dev/shm'));ram_boundary(ram)
+            auth=ram/'empty.json';auth.write_text('{"auths":{}}');auth.chmod(0o600)
+            env={'PATH':'/usr/bin:/bin','HOME':str(ram),'XDG_CONFIG_HOME':str(ram),'XDG_RUNTIME_DIR':str(ram),'REGISTRY_AUTH_FILE':str(auth),'LANG':'C.UTF-8'}
+            child(['/usr/bin/skopeo','copy','--preserve-digests','--retry-times','0','--src-no-creds','--src-tls-verify=true','--src-authfile',str(auth),'docker://ghcr.io/'+NAME+'@'+IMAGE,'oci:'+str(p/'anonymous-pull')+':verified'],env,r,seconds=180)
+            pulled_blobs(p/'anonymous-pull')
+           finally:
+            if ram is not None:shutil.rmtree(ram)
+           print('ANONYMOUS=EXACT_MANIFEST_AND_ALL_BLOBS_MATCH_REVIEW_REQUIRED')
+          def main():
+           try:
+            need(sys.argv[1:] in [['prepare'],['publish'],['cleanup']],'MODE_NOT_AUTHORISED')
+            {'prepare':prepare,'publish':publish,'cleanup':cleanup}[sys.argv[1]]()
+           except BaseException:
+            print('RESULT=NOT_ACCEPTED_STOP_NO_RETRY');return 2
+           return 0
+          if __name__=='__main__':sys.exit(main())
+          E6_APPROVED_PYTHON
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-publisher.py" | /usr/bin/cut -d ' ' -f 1)" = "972ed54fd87eb4a9beb44cd4f52344f61c4358c6c3cb3e4edc927904ab91373c"
+          /usr/bin/python3 -I "$RUNNER_TEMP/e6-ghcr-publisher.py" prepare
+      - name: One proposed credential-consuming publication and independent authenticated pull
+        env:
+          GH_PUBLISH_TOKEN: ${{ github.token }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-publisher.py" | /usr/bin/cut -d ' ' -f 1)" = "972ed54fd87eb4a9beb44cd4f52344f61c4358c6c3cb3e4edc927904ab91373c"
+          exec /usr/bin/python3 -I "$RUNNER_TEMP/e6-ghcr-publisher.py" publish
+      - name: Always verify recorded temporary auth cleanup
+        if: ${{ always() }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-publisher.py" | /usr/bin/cut -d ' ' -f 1)" = "972ed54fd87eb4a9beb44cd4f52344f61c4358c6c3cb3e4edc927904ab91373c"
+          /usr/bin/python3 -I "$RUNNER_TEMP/e6-ghcr-publisher.py" cleanup
