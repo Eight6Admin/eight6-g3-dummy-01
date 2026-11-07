@@ -25,6 +25,98 @@ jobs:
           with p.open('xb') as f:f.write(b)
           p.chmod(0o400)
           PY
+      - name: Materialise exact fresh_attempt_guard.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > "$RUNNER_TEMP/fresh_attempt_guard.py" <<'E6_FRESH_GUARD'
+          """Inactive, credential-free public-evidence guard. No execution authority."""
+          import hashlib,json,re,signal,urllib.request
+          from pathlib import Path
+          
+          BASE_COMMIT='940ea091cb1b0f0fef7fed474519ce877ba63a61'
+          BASE_WORKFLOW_SHA='1B9AC647F6132A95B0CFD38104AEB804597FD39216F00A120176024874B082C4'
+          BASE_SCRIPT_SHA='D17F99CB44B8FA587C449650AA4E2863B186B34BE3F833C47A3A85288FC72D4C'
+          WORKFLOW_PATH='.github/workflows/g3-maintained-container-preflight-01.yml'
+          ATTEMPT='PHASE3C2_MAINTAINED_VERSION_DIAGNOSTIC_02'
+          BASE_RUNS=[{'id': 42371938487, 'workflow_id': 410282391, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '5f47b13c8fb322f7000d3c229c75bb1743332cc5', 'head_branch': 'main', 'path': '.github/workflows/g3-maintained-container-preflight-01.yml'}, {'id': 42364340065, 'workflow_id': 410213436, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': 'f2105cc619cb2989c7f241ed4f65a26c5dfe94dc', 'head_branch': 'main', 'path': '.github/workflows/g3-combined-runner-compatibility-03.yml'}, {'id': 42356506998, 'workflow_id': 410179626, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '6bdacaaef952e17f4fe0fe43ea261513b90ef1e8', 'head_branch': 'main', 'path': '.github/workflows/g3-ghcr-runner-preflight-02.yml'}, {'id': 42308022727, 'workflow_id': 409838027, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '4ebd4cb5c745030e99a58999a1981f14f7139f8f', 'head_branch': 'main', 'path': '.github/workflows/g3-ghcr-publish-01.yml'}, {'id': 42256553478, 'workflow_id': 409566888, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'success', 'head_sha': '455ea9e230470938f1f3318f6f2a8588b5e3c514', 'head_branch': 'main', 'path': '.github/workflows/g3-ghcr-tool-preflight-01.yml'}]
+          class GuardStop(Exception):pass
+          def require(ok,code):
+           if not ok:raise GuardStop(code)
+          def sha(raw):return hashlib.sha256(raw).hexdigest().upper()
+          def project(row):
+           return {k:row[k] for k in ('id','workflow_id','run_number','run_attempt','event','status','conclusion','head_sha','head_branch','path')}
+          def guard_step(raw):
+           # Deterministic same-workflow materialisation; no new workflow or permissions.
+           body='set -euo pipefail\numask 077\ncat > "$RUNNER_TEMP/fresh_attempt_guard.py" <<\'E6_FRESH_GUARD\'\n'+raw.decode('utf-8')+"E6_FRESH_GUARD\ntest \"$(/usr/bin/sha256sum \"$RUNNER_TEMP/fresh_attempt_guard.py\" | /usr/bin/cut -d ' ' -f 1)\" = '"+sha(raw).lower()+"'\n"
+           return '      - name: Materialise exact fresh_attempt_guard.py\n        shell: bash\n        run: |\n'+''.join('          '+line+'\n' for line in body.splitlines())
+          def reconstruct(base,script,guard):
+           text=base.decode('utf-8')
+           start='          cat > "$RUNNER_TEMP/maintained_probe.py" <<\'E6_MAINTAINED_PROBE\'\n'
+           end='          E6_MAINTAINED_PROBE\n'
+           require(text.count(start)==1 and text.count(end)==1,'BASE_SOURCE_SHAPE')
+           embedded=text.split(start,1)[1].split(end,1)[0]
+           require(all(line.startswith('          ') for line in embedded.splitlines()),'BASE_SCRIPT_INDENT')
+           old=''.join(line[10:]+'\n' for line in embedded.splitlines()).encode()
+           require(sha(old)==BASE_SCRIPT_SHA,'BASE_SCRIPT_HASH')
+           replacement=''.join('          '+line+'\n' for line in script.decode().splitlines())
+           require(text.count(BASE_SCRIPT_SHA.lower())==1,'BASE_MATERIALISATION_HASH')
+           updated=text.replace(start+embedded+end,start+replacement+end).replace(BASE_SCRIPT_SHA.lower(),sha(script).lower())
+           anchor='      - name: Materialise exact maintained_probe.py\n'
+           require(updated.count(anchor)==1,'BASE_STEP_SHAPE')
+           return updated.replace(anchor,guard_step(guard)+anchor).encode()
+          def validate(e,evidence,script,guard):
+           require(e.get('GITHUB_RUN_NUMBER')=='2' and e.get('GITHUB_RUN_ATTEMPT')=='1','FRESH_NOT_RERUN')
+           require(e.get('GITHUB_REPOSITORY')=='Eight6Admin/eight6-g3-dummy-01' and e.get('GITHUB_ACTOR')=='Eight6Admin' and e.get('GITHUB_EVENT_NAME')=='workflow_dispatch' and e.get('GITHUB_REF')=='refs/heads/main','FRESH_CONTEXT')
+           revision=e.get('GITHUB_SHA','');runid=e.get('GITHUB_RUN_ID','')
+           require(re.fullmatch('[0-9a-f]{40}',revision) is not None and e.get('GITHUB_WORKFLOW_SHA')==revision and re.fullmatch('[0-9]+',runid) is not None,'FRESH_SOURCE_CONTEXT')
+           require(set(evidence)=={'runs','commit','base','current'},'EVIDENCE_INVENTORY')
+           runs=evidence['runs'];rows=runs['workflow_runs']
+           require(runs['total_count']==len(rows)==len(BASE_RUNS)+1 and len({r['id'] for r in rows})==len(rows),'UNEXPECTED_OR_INCOMPLETE_HISTORY')
+           current=[r for r in rows if str(r['id'])==runid]
+           require(len(current)==1 and int(runid) not in {r['id'] for r in BASE_RUNS},'FRESH_RUN_ID')
+           old=[project(r) for r in rows if str(r['id'])!=runid]
+           require(sorted(old,key=lambda r:r['id'])==sorted(BASE_RUNS,key=lambda r:r['id']),'HISTORICAL_RUN_CHANGED')
+           row=current[0]
+           require(row['workflow_id']==410282391 and row['run_number']==2 and row['run_attempt']==1 and row['event']=='workflow_dispatch' and row['status']=='in_progress' and row['conclusion'] is None and row['head_sha']==revision and row['head_branch']=='main' and row['path']==WORKFLOW_PATH and row['actor']['login']=='Eight6Admin' and row['triggering_actor']['login']=='Eight6Admin' and row['repository']['full_name']=='Eight6Admin/eight6-g3-dummy-01','CURRENT_RUN_BINDING')
+           commit=evidence['commit']
+           require(commit['sha']==revision and [p['sha'] for p in commit['parents']]==[BASE_COMMIT],'SOURCE_PARENT')
+           require(len(commit['files'])==1 and commit['files'][0]['filename']==WORKFLOW_PATH and commit['files'][0]['status']=='modified','SOURCE_CHANGE_SCOPE')
+           require(sha(evidence['base'])==BASE_WORKFLOW_SHA,'BASE_WORKFLOW_HASH')
+           require(evidence['current']==reconstruct(evidence['base'],script,guard),'CURRENT_WORKFLOW_BYTES')
+           return {'attempt':ATTEMPT,'status':'FRESH_GUARD_PASS','run_id':runid,'head_sha':revision,'historical_run1':42371938487,'historical_run1_status':'FAILED / NOT ACCEPTED / CONSUMED','workflow_sha256':sha(evidence['current']),'script_sha256':sha(script),'guard_sha256':sha(guard),'history_count':len(rows),'scope':'Fresh-history/source guard only; Founder execution approval remains external and mandatory'}
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+           def redirect_request(self,*args,**kwargs):raise GuardStop('EVIDENCE_REDIRECT')
+          def acquire(e):
+           op=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect(),urllib.request.HTTPSHandler())
+           root='https://api.github.com/repos/Eight6Admin/eight6-g3-dummy-01'
+           raw='https://raw.githubusercontent.com/Eight6Admin/eight6-g3-dummy-01/'
+           def get(url,parsed):
+            req=urllib.request.Request(url,headers={'User-Agent':'Eight6-credential-free-fresh-diagnostic-guard','Accept':'application/vnd.github+json','Cache-Control':'no-cache'})
+            with op.open(req,timeout=10) as r:
+             require(r.status==200,'EVIDENCE_HTTP_STATUS');data=r.read(1048577);require(len(data)<=1048576,'EVIDENCE_OUTPUT_BOUND')
+             require('Link' not in r.headers,'EVIDENCE_PAGINATION')
+            if not parsed:return data
+            def pairs(items):
+             d={}
+             for k,v in items:require(k not in d,'DUPLICATE_EVIDENCE_KEY');d[k]=v
+             return d
+            return json.loads(data,object_pairs_hook=pairs)
+           return {'runs':get(root+'/actions/runs?per_page=100',True),'commit':get(root+'/commits/main',True),'base':get(raw+BASE_COMMIT+'/'+WORKFLOW_PATH,False),'current':get(raw+e['GITHUB_SHA']+'/'+WORKFLOW_PATH,False)}
+          def verify(e,script_path):
+           previous=signal.signal(signal.SIGALRM,lambda *_:(_ for _ in ()).throw(GuardStop('EVIDENCE_DEADLINE')))
+           signal.setitimer(signal.ITIMER_REAL,60)
+           try:
+            result=validate(e,acquire(e),Path(script_path).read_bytes(),Path(__file__).read_bytes())
+            print('FRESH_DIAGNOSTIC_GUARD='+json.dumps(result,sort_keys=True,separators=(',',':')),flush=True)
+           except BaseException as exc:
+            code=str(exc) if isinstance(exc,GuardStop) else 'GITHUB_EVIDENCE_UNAVAILABLE_OR_MALFORMED'
+            print('FRESH_DIAGNOSTIC_GUARD='+json.dumps({'status':'STOP','attempt':ATTEMPT,'code':code,'no_retry':True},sort_keys=True,separators=(',',':')),flush=True)
+            raise GuardStop(code) from None
+           finally:signal.setitimer(signal.ITIMER_REAL,0);signal.signal(signal.SIGALRM,previous)
+          E6_FRESH_GUARD
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/fresh_attempt_guard.py" | /usr/bin/cut -d ' ' -f 1)" = '5dc55efb39c285bd4768b68166604a12ef4fdbf611168869962af6c305e68909'
       - name: Materialise exact maintained_probe.py
         shell: bash
         run: |
@@ -32,7 +124,7 @@ jobs:
           umask 077
           cat > "$RUNNER_TEMP/maintained_probe.py" <<'E6_MAINTAINED_PROBE'
           """Inactive credential-free test. No publication, credentials or privileged fallback."""
-          import hashlib, json, os, re, selectors, shutil, signal, stat, subprocess, sys
+          import hashlib, json, os, re, selectors, shutil, signal, stat, subprocess, sys, runpy
           import tarfile, tempfile, time, urllib.request, ssl
           from pathlib import Path
           from urllib.parse import urlsplit
@@ -122,11 +214,12 @@ jobs:
            for d,size in BLOBS.items():
             p=b/d;need(p.is_file() and not p.is_symlink() and p.stat().st_size==size and sha(p).lower()==d,'DEST_BLOB')
           def context(e):
-           expected={'GITHUB_REPOSITORY':'Eight6Admin/eight6-g3-dummy-01','GITHUB_ACTOR':'Eight6Admin','GITHUB_REF':'refs/heads/main','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_NUMBER':'1','GITHUB_RUN_ATTEMPT':'1','RUNNER_OS':'Linux','RUNNER_ARCH':'X64'}
+           expected={'GITHUB_REPOSITORY':'Eight6Admin/eight6-g3-dummy-01','GITHUB_ACTOR':'Eight6Admin','GITHUB_REF':'refs/heads/main','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_NUMBER':'2','GITHUB_RUN_ATTEMPT':'1','RUNNER_OS':'Linux','RUNNER_ARCH':'X64'}
            need(all(e.get(k)==v for k,v in expected.items()),'CONTEXT_OR_CONSUMED')
            need(re.fullmatch('[0-9a-f]{40}',e.get('GITHUB_SHA','')) is not None and e.get('GITHUB_WORKFLOW_SHA')==e['GITHUB_SHA'],'SOURCE_REVISION')
            need(re.fullmatch('[0-9]+',e.get('GITHUB_RUN_ID','')) is not None,'RUN_ID')
            need(re.fullmatch('[0-9.]{1,40}',e.get('ImageVersion','')) is not None,'RUNNER_IMAGE_METADATA')
+           runpy.run_path(str(Path(__file__).with_name('fresh_attempt_guard.py')))['verify'](e,Path(__file__))
           def docker_base(work):return ['/usr/bin/docker','--host','unix:///var/run/docker.sock','--config',str(work/'home/docker')]
           def docker(work,args,stage,seconds=45,required=True):return child(docker_base(work)+args,work/'home',stage,seconds,required)
           def image_identity(row):
@@ -219,7 +312,7 @@ jobs:
            return 0 if status=='PASS' and cleanup else 2
           if __name__=='__main__':sys.exit(main())
           E6_MAINTAINED_PROBE
-          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/maintained_probe.py" | /usr/bin/cut -d ' ' -f 1)" = 'd17f99cb44b8fa587c449650aa4e2863b186b34be3f833c47a3a85288fc72d4c'
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/maintained_probe.py" | /usr/bin/cut -d ' ' -f 1)" = '25bf84e857ca9add750a3cd3acfb833abebd15dcfbddcdab4fe61037fb1d0664'
       - name: One credential-free maintained container observation
         shell: bash
         run: |
