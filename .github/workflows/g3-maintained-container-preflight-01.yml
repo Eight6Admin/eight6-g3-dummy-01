@@ -25,6 +25,43 @@ jobs:
           with p.open('xb') as f:f.write(b)
           p.chmod(0o400)
           PY
+      - name: Materialise exact copy_diagnostics.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > "$RUNNER_TEMP/copy_diagnostics.py" <<'E6_COPY_DIAGNOSTICS'
+          """Finite container-only diagnostics. No subprocesses, credentials or network."""
+          import hashlib,re,json
+          WORDS=set('time level fatal error warning msg initializing source destination oci archive creating temp temporary directory unpacking opening reading writing extracting copying blob manifest config image getting signatures storing list signature trying reuse using read only read-only file system permission denied operation not permitted no such or not found failed invalid unexpected end of input mkdir stat open lstat readlink rename remove unlink chmod chown untar tar extract argument unknown flag unsupported network is unreachable connection refused cannot allocate memory out space device resource busy exists success false true info debug sha256 verified EOF'.lower().split())
+          PATH=re.compile(r'/[^\s\"\'<>:,;()]*')
+          SAFE_PATH=re.compile(r'(?:/input/(?:frozen\.oci\.tar|policy\.json|empty\.json)|/output(?:/copied(?:/[a-zA-Z0-9_.-]+)*|/container_images_[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)*)?|/tmp|/var/tmp)')
+          def state(row):
+           s=row['State']
+           if type(s.get('Running')) is not bool or type(s.get('OOMKilled')) is not bool or type(s.get('Error')) is not str:raise ValueError('STATE_TYPES')
+           status=s.get('Status');code=s.get('ExitCode')
+           if status not in {'created','running','paused','restarting','removing','exited','dead'} or type(code) is not int or not -255<=code<=255:raise ValueError('STATE_SHAPE')
+           terminated=not s['Running'] and status in {'exited','dead'}
+           return {'status':status,'running':s['Running'],'termination_observed':terminated,'exit_code':code if terminated else None,'oom_killed':s['OOMKilled'],'runtime_error_present':bool(s.get('Error'))}
+          def capture(raw):
+           result={'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest().upper(),'limit':4096,'complete':False,'sanitized_text':None}
+           if len(raw)>4096:result['withheld']='OUTPUT_BOUND';return result
+           try:text=raw.decode('utf-8')
+           except UnicodeError:result['withheld']='ENCODING';return result
+           if any(ord(c)<32 and c not in '\n\r\t' for c in text) or any(ord(c)>126 for c in text):result['withheld']='CONTROL_OR_NONASCII';return result
+           if re.search(r'(?i)token|password|secret|bearer|authorization|https?://|gh[pousr]_|github_pat_|bwsm_',text):result['withheld']='SENSITIVE_MARKER';return result
+           def words(s):return re.sub(r'[A-Za-z_][A-Za-z_0-9.-]*',lambda m:m.group() if m.group().lower() in WORDS else '[REDACTED_WORD]',s)
+           parts=[];end=0
+           for m in PATH.finditer(text):
+            parts.append(words(text[end:m.start()]));value=m.group()
+            safe=SAFE_PATH.fullmatch(value) is not None and '..' not in value.split('/')
+            parts.append(value if safe else '[REDACTED_PATH]');end=m.end()
+           parts.append(words(text[end:]));text=''.join(parts)
+           if len(json.dumps(text,ensure_ascii=True).encode('ascii'))>4096:result['withheld']='SANITIZED_OUTPUT_BOUND';return result
+           result.update(complete=True,sanitized_text=text,redacted='[REDACTED_' in text)
+           return result
+          E6_COPY_DIAGNOSTICS
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/copy_diagnostics.py" | /usr/bin/cut -d ' ' -f 1)" = 'f8830f324eba463201f8f3bb5a9e42c7d7821a209ae97288d878e62bb85d0eeb'
       - name: Materialise exact fresh_attempt_guard.py
         shell: bash
         run: |
@@ -35,20 +72,20 @@ jobs:
           import hashlib,json,re,signal,urllib.request
           from pathlib import Path
           
-          BASE_COMMIT='00c92e3f5b30be8ea341e4f06559378e0036f1a0'
-          BASE_WORKFLOW_SHA='A513E3CDEF9E3ACE18B98E196FB605DD1748329A1D5FC46FD0C31E379FE7719E'
-          BASE_SCRIPT_SHA='25BF84E857CA9ADD750A3CD3ACFB833ABEBD15DCFBDDCDAB4FE61037FB1D0664'
-          BASE_GUARD_SHA='5DC55EFB39C285BD4768B68166604A12EF4FDBF611168869962AF6C305E68909'
+          BASE_COMMIT='97c2c619f0ec06ad64326ecc70f788637e6f7f99'
+          BASE_WORKFLOW_SHA='23C2C7C28EFAAFFF597EA035E4D8B148056E0156E66167B56F3C41E926A09680'
+          BASE_SCRIPT_SHA='41789386810C414FDE90612767A9E9B3A7901C6381FEB12A92C6CB4BCD855651'
+          BASE_GUARD_SHA='32A3CDF6B8B9EEDED9545B10DE896BDE8106B3E5CEA9C700A0E1DCB0EC035FBE'
           WORKFLOW_PATH='.github/workflows/g3-maintained-container-preflight-01.yml'
-          ATTEMPT='PHASE3C2_MAINTAINED_LOCALCOPY_03'
-          BASE_RUNS=[{'id': 42378955656, 'workflow_id': 410282391, 'run_number': 2, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '00c92e3f5b30be8ea341e4f06559378e0036f1a0', 'head_branch': 'main', 'path': '.github/workflows/g3-maintained-container-preflight-01.yml'}, {'id': 42371938487, 'workflow_id': 410282391, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '5f47b13c8fb322f7000d3c229c75bb1743332cc5', 'head_branch': 'main', 'path': '.github/workflows/g3-maintained-container-preflight-01.yml'}, {'id': 42364340065, 'workflow_id': 410213436, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': 'f2105cc619cb2989c7f241ed4f65a26c5dfe94dc', 'head_branch': 'main', 'path': '.github/workflows/g3-combined-runner-compatibility-03.yml'}, {'id': 42356506998, 'workflow_id': 410179626, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '6bdacaaef952e17f4fe0fe43ea261513b90ef1e8', 'head_branch': 'main', 'path': '.github/workflows/g3-ghcr-runner-preflight-02.yml'}, {'id': 42308022727, 'workflow_id': 409838027, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '4ebd4cb5c745030e99a58999a1981f14f7139f8f', 'head_branch': 'main', 'path': '.github/workflows/g3-ghcr-publish-01.yml'}, {'id': 42256553478, 'workflow_id': 409566888, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'success', 'head_sha': '455ea9e230470938f1f3318f6f2a8588b5e3c514', 'head_branch': 'main', 'path': '.github/workflows/g3-ghcr-tool-preflight-01.yml'}]
+          ATTEMPT='PHASE3C2_MAINTAINED_LOCALCOPY_04'
+          BASE_RUNS=[{'id': 42384470925, 'workflow_id': 410282391, 'run_number': 3, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '97c2c619f0ec06ad64326ecc70f788637e6f7f99', 'head_branch': 'main', 'path': '.github/workflows/g3-maintained-container-preflight-01.yml'}, {'id': 42378955656, 'workflow_id': 410282391, 'run_number': 2, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '00c92e3f5b30be8ea341e4f06559378e0036f1a0', 'head_branch': 'main', 'path': '.github/workflows/g3-maintained-container-preflight-01.yml'}, {'id': 42371938487, 'workflow_id': 410282391, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '5f47b13c8fb322f7000d3c229c75bb1743332cc5', 'head_branch': 'main', 'path': '.github/workflows/g3-maintained-container-preflight-01.yml'}, {'id': 42364340065, 'workflow_id': 410213436, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': 'f2105cc619cb2989c7f241ed4f65a26c5dfe94dc', 'head_branch': 'main', 'path': '.github/workflows/g3-combined-runner-compatibility-03.yml'}, {'id': 42356506998, 'workflow_id': 410179626, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '6bdacaaef952e17f4fe0fe43ea261513b90ef1e8', 'head_branch': 'main', 'path': '.github/workflows/g3-ghcr-runner-preflight-02.yml'}, {'id': 42308022727, 'workflow_id': 409838027, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'failure', 'head_sha': '4ebd4cb5c745030e99a58999a1981f14f7139f8f', 'head_branch': 'main', 'path': '.github/workflows/g3-ghcr-publish-01.yml'}, {'id': 42256553478, 'workflow_id': 409566888, 'run_number': 1, 'run_attempt': 1, 'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'success', 'head_sha': '455ea9e230470938f1f3318f6f2a8588b5e3c514', 'head_branch': 'main', 'path': '.github/workflows/g3-ghcr-tool-preflight-01.yml'}]
           class GuardStop(Exception):pass
           def require(ok,code):
            if not ok:raise GuardStop(code)
           def sha(raw):return hashlib.sha256(raw).hexdigest().upper()
           def project(row):
            return {k:row[k] for k in ('id','workflow_id','run_number','run_attempt','event','status','conclusion','head_sha','head_branch','path')}
-          def reconstruct(base,script,guard):
+          def reconstruct(base,script,guard,diagnostic):
            text=base.decode('utf-8')
            def replace_file(name,marker,expected,new):
             nonlocal text
@@ -65,9 +102,14 @@ jobs:
             text=text.replace(start+embedded+end,start+body+end).replace(checksum,checksum.replace(expected.lower(),sha(new).lower()))
            replace_file('maintained_probe.py','E6_MAINTAINED_PROBE',BASE_SCRIPT_SHA,script)
            replace_file('fresh_attempt_guard.py','E6_FRESH_GUARD',BASE_GUARD_SHA,guard)
+           step='      - name: Materialise exact copy_diagnostics.py\n        shell: bash\n        run: |\n          set -euo pipefail\n          umask 077\n          cat > "$RUNNER_TEMP/copy_diagnostics.py" <<\'E6_COPY_DIAGNOSTICS\'\n'
+           step+=''.join('          '+line+'\n' for line in diagnostic.decode('utf-8').splitlines())
+           step+='          E6_COPY_DIAGNOSTICS\n          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/copy_diagnostics.py" | /usr/bin/cut -d \' \' -f 1)" = \''+sha(diagnostic).lower()+'\'\n'
+           anchor='      - name: Materialise exact fresh_attempt_guard.py\n'
+           require(text.count(anchor)==1,'DIAGNOSTIC_STEP_SCOPE');text=text.replace(anchor,step+anchor)
            return text.encode()
-          def validate(e,evidence,script,guard):
-           require(e.get('GITHUB_RUN_NUMBER')=='3' and e.get('GITHUB_RUN_ATTEMPT')=='1','FRESH_NOT_RERUN')
+          def validate(e,evidence,script,guard,diagnostic):
+           require(e.get('GITHUB_RUN_NUMBER')=='4' and e.get('GITHUB_RUN_ATTEMPT')=='1','FRESH_NOT_RERUN')
            require(e.get('GITHUB_REPOSITORY')=='Eight6Admin/eight6-g3-dummy-01' and e.get('GITHUB_ACTOR')=='Eight6Admin' and e.get('GITHUB_EVENT_NAME')=='workflow_dispatch' and e.get('GITHUB_REF')=='refs/heads/main','FRESH_CONTEXT')
            revision=e.get('GITHUB_SHA','');runid=e.get('GITHUB_RUN_ID','')
            require(re.fullmatch('[0-9a-f]{40}',revision) is not None and e.get('GITHUB_WORKFLOW_SHA')==revision and re.fullmatch('[0-9]+',runid) is not None,'FRESH_SOURCE_CONTEXT')
@@ -79,13 +121,13 @@ jobs:
            old=[project(r) for r in rows if str(r['id'])!=runid]
            require(sorted(old,key=lambda r:r['id'])==sorted(BASE_RUNS,key=lambda r:r['id']),'HISTORICAL_RUN_CHANGED')
            row=current[0]
-           require(row['workflow_id']==410282391 and row['run_number']==3 and row['run_attempt']==1 and row['event']=='workflow_dispatch' and row['status']=='in_progress' and row['conclusion'] is None and row['head_sha']==revision and row['head_branch']=='main' and row['path']==WORKFLOW_PATH and row['actor']['login']=='Eight6Admin' and row['triggering_actor']['login']=='Eight6Admin' and row['repository']['full_name']=='Eight6Admin/eight6-g3-dummy-01','CURRENT_RUN_BINDING')
+           require(row['workflow_id']==410282391 and row['run_number']==4 and row['run_attempt']==1 and row['event']=='workflow_dispatch' and row['status']=='in_progress' and row['conclusion'] is None and row['head_sha']==revision and row['head_branch']=='main' and row['path']==WORKFLOW_PATH and row['actor']['login']=='Eight6Admin' and row['triggering_actor']['login']=='Eight6Admin' and row['repository']['full_name']=='Eight6Admin/eight6-g3-dummy-01','CURRENT_RUN_BINDING')
            commit=evidence['commit']
            require(commit['sha']==revision and [p['sha'] for p in commit['parents']]==[BASE_COMMIT],'SOURCE_PARENT')
            require(len(commit['files'])==1 and commit['files'][0]['filename']==WORKFLOW_PATH and commit['files'][0]['status']=='modified','SOURCE_CHANGE_SCOPE')
            require(sha(evidence['base'])==BASE_WORKFLOW_SHA,'BASE_WORKFLOW_HASH')
-           require(evidence['current']==reconstruct(evidence['base'],script,guard),'CURRENT_WORKFLOW_BYTES')
-           return {'attempt':ATTEMPT,'status':'FRESH_GUARD_PASS','run_id':runid,'head_sha':revision,'historical_run1':42371938487,'historical_run1_status':'FAILED / NOT ACCEPTED / CONSUMED','workflow_sha256':sha(evidence['current']),'script_sha256':sha(script),'guard_sha256':sha(guard),'history_count':len(rows),'scope':'Fresh-history/source guard only; Founder execution approval remains external and mandatory'}
+           require(evidence['current']==reconstruct(evidence['base'],script,guard,diagnostic),'CURRENT_WORKFLOW_BYTES')
+           return {'attempt':ATTEMPT,'status':'FRESH_GUARD_PASS','run_id':runid,'head_sha':revision,'historical_run1':42371938487,'historical_run1_status':'FAILED / NOT ACCEPTED / CONSUMED','workflow_sha256':sha(evidence['current']),'script_sha256':sha(script),'guard_sha256':sha(guard),'diagnostic_sha256':sha(diagnostic),'history_count':len(rows),'scope':'Fresh-history/source guard only; Founder execution approval remains external and mandatory'}
           class NoRedirect(urllib.request.HTTPRedirectHandler):
            def redirect_request(self,*args,**kwargs):raise GuardStop('EVIDENCE_REDIRECT')
           def acquire(e):
@@ -108,7 +150,7 @@ jobs:
            previous=signal.signal(signal.SIGALRM,lambda *_:(_ for _ in ()).throw(GuardStop('EVIDENCE_DEADLINE')))
            signal.setitimer(signal.ITIMER_REAL,60)
            try:
-            result=validate(e,acquire(e),Path(script_path).read_bytes(),Path(__file__).read_bytes())
+            result=validate(e,acquire(e),Path(script_path).read_bytes(),Path(__file__).read_bytes(),Path(script_path).with_name('copy_diagnostics.py').read_bytes())
             print('FRESH_DIAGNOSTIC_GUARD='+json.dumps(result,sort_keys=True,separators=(',',':')),flush=True)
            except BaseException as exc:
             code=str(exc) if isinstance(exc,GuardStop) else 'GITHUB_EVIDENCE_UNAVAILABLE_OR_MALFORMED'
@@ -116,7 +158,7 @@ jobs:
             raise GuardStop(code) from None
            finally:signal.setitimer(signal.ITIMER_REAL,0);signal.signal(signal.SIGALRM,previous)
           E6_FRESH_GUARD
-          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/fresh_attempt_guard.py" | /usr/bin/cut -d ' ' -f 1)" = '32a3cdf6b8b9eeded9545b10de896bde8106b3e5cea9c700a0e1dcb0ec035fbe'
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/fresh_attempt_guard.py" | /usr/bin/cut -d ' ' -f 1)" = 'c5182712da3485d705840dc4e81f7bdc4948eb4b693034b6f3cbf6c21134da13'
       - name: Materialise exact maintained_probe.py
         shell: bash
         run: |
@@ -214,7 +256,7 @@ jobs:
            for d,size in BLOBS.items():
             p=b/d;need(p.is_file() and not p.is_symlink() and p.stat().st_size==size and sha(p).lower()==d,'DEST_BLOB')
           def context(e):
-           expected={'GITHUB_REPOSITORY':'Eight6Admin/eight6-g3-dummy-01','GITHUB_ACTOR':'Eight6Admin','GITHUB_REF':'refs/heads/main','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_NUMBER':'3','GITHUB_RUN_ATTEMPT':'1','RUNNER_OS':'Linux','RUNNER_ARCH':'X64'}
+           expected={'GITHUB_REPOSITORY':'Eight6Admin/eight6-g3-dummy-01','GITHUB_ACTOR':'Eight6Admin','GITHUB_REF':'refs/heads/main','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_NUMBER':'4','GITHUB_RUN_ATTEMPT':'1','RUNNER_OS':'Linux','RUNNER_ARCH':'X64'}
            need(all(e.get(k)==v for k,v in expected.items()),'CONTEXT_OR_CONSUMED')
            need(re.fullmatch('[0-9a-f]{40}',e.get('GITHUB_SHA','')) is not None and e.get('GITHUB_WORKFLOW_SHA')==e['GITHUB_SHA'],'SOURCE_REVISION')
            need(re.fullmatch('[0-9]+',e.get('GITHUB_RUN_ID','')) is not None,'RUN_ID')
@@ -242,18 +284,40 @@ jobs:
             x=mounts[dest];need(x['Type']=='bind' and Path(x['Source'])==src and x['RW'] is rw,'MOUNT_BOUNDARY')
            need(h.get('Tmpfs')=={'/tmp':'rw,nosuid,nodev,noexec,size=128m,mode=1777'},'TMPFS_INVENTORY')
            need(not any('docker.sock' in x.get('Source','') for x in row['Mounts']),'NO_SOCKET_MOUNT')
+           env=c.get('Env') or []
+           for key,value in {'HOME':'/tmp','XDG_CONFIG_HOME':'/tmp','XDG_RUNTIME_DIR':'/tmp','REGISTRY_AUTH_FILE':'/input/empty.json','TMPDIR':'/tmp','XDG_CACHE_HOME':'/tmp','XDG_DATA_HOME':'/tmp'}.items():
+            need([x for x in env if x.startswith(key+'=')]==[key+'='+value],'WRITABLE_ENVIRONMENT')
           def run_container(work,stage,args,runid,entrypoint=None,seconds=60):
            uid,gid=os.getuid(),os.getgid();need(uid>0,'NONROOT_HOST_REQUIRED')
            name='e6-maintained-'+runid+'-'+stage;cidfile=work/(stage+'.cid')
-           cmd=['create','--pull','never','--platform','linux/amd64','--name',name,'--cidfile',str(cidfile),'--label','eight6.probe.run='+runid,'--label','eight6.probe.stage='+stage,'--user',str(uid)+':'+str(gid),'--cap-drop','ALL','--security-opt','no-new-privileges:true','--read-only','--network','none','--ipc','private','--pids-limit','64','--memory','1g','--cpus','1','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777','--mount','type=bind,src='+str(work/'input')+',dst=/input,readonly','--mount','type=bind,src='+str(work/'output')+',dst=/output','--env','HOME=/tmp','--env','XDG_CONFIG_HOME=/tmp','--env','XDG_RUNTIME_DIR=/tmp','--env','REGISTRY_AUTH_FILE=/input/empty.json']
+           cmd=['create','--pull','never','--platform','linux/amd64','--name',name,'--cidfile',str(cidfile),'--label','eight6.probe.run='+runid,'--label','eight6.probe.stage='+stage,'--user',str(uid)+':'+str(gid),'--cap-drop','ALL','--security-opt','no-new-privileges:true','--read-only','--network','none','--ipc','private','--pids-limit','64','--memory','1g','--cpus','1','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777','--mount','type=bind,src='+str(work/'input')+',dst=/input,readonly','--mount','type=bind,src='+str(work/'output')+',dst=/output','--env','HOME=/tmp','--env','XDG_CONFIG_HOME=/tmp','--env','XDG_RUNTIME_DIR=/tmp','--env','REGISTRY_AUTH_FILE=/input/empty.json','--env','TMPDIR=/tmp','--env','XDG_CACHE_HOME=/tmp','--env','XDG_DATA_HOME=/tmp']
            if entrypoint:cmd+=['--entrypoint',entrypoint]
            _,out,_=docker(work,cmd+[IMAGE]+args,'CREATE_'+stage)
            cid=out.decode('ascii').strip();need(re.fullmatch('[0-9a-f]{64}',cid) is not None and cidfile.read_text().strip()==cid,'CID_BINDING')
            _,out,_=docker(work,['inspect',cid],'INSPECT_'+stage);rows=loads(out);need(len(rows)==1,'CONTAINER_SHAPE');container_identity(rows[0],work,stage,runid,uid,gid)
-           _,out,err=docker(work,['start','--attach',cid],'RUN_'+stage,seconds)
-           _,state,_=docker(work,['inspect',cid],'POST_'+stage);row=loads(state)[0];need(not row['State']['Running'] and row['State']['ExitCode']==0 and not row['State'].get('OOMKilled'),'CONTAINER_EXIT')
+           start_failure=None
+           try:rc,out,err=docker(work,['start','--attach',cid],'RUN_'+stage,seconds,required=stage!='copy')
+           except Stop as exc:
+            if stage!='copy':raise
+            start_failure=exc;rc=None;out=err=b''
+           _,raw,_=docker(work,['inspect',cid],'POST_'+stage);rows=loads(raw);need(len(rows)==1 and rows[0]['Id']==cid,'POST_CONTAINER_ID')
+           row=rows[0];container_identity(row,work,stage,runid,uid,gid)
+           d=runpy.run_path(str(Path(__file__).with_name('copy_diagnostics.py')));observed=d['state'](row)
+           if stage=='copy':
+            print('COPY_CONTAINER_STATE='+json.dumps(observed,sort_keys=True,separators=(',',':')),flush=True)
+            need(observed['termination_observed'],'COPY_TERMINATION_UNPROVEN')
+            lr,lo,le=docker(work,['logs',cid],'COPY_CONTAINER_LOGS',15,required=False)
+            capture={'source':'CID-targeted docker logs; may include client/daemon messages; all text sanitized','available':lr==0}
+            if lr==0:capture.update(stdout=d['capture'](lo),stderr=d['capture'](le))
+            print('COPY_CONTAINER_OUTPUT='+json.dumps(capture,sort_keys=True,separators=(',',':')),flush=True)
+            need(lr==0,'COPY_LOG_EVIDENCE_UNAVAILABLE')
+            need(capture['stdout']['complete'] and capture['stderr']['complete'],'COPY_DIAGNOSTIC_INCOMPLETE')
+           if start_failure:raise start_failure
+           need(rc==0,'NATIVE_NONZERO_RUN_'+stage)
+           need(observed['termination_observed'] and observed['exit_code']==0 and not observed['oom_killed'] and not observed['runtime_error_present'],'CONTAINER_EXIT')
            docker(work,['rm',cid],'REMOVE_'+stage)
            return out,err
+          
           def inventory(work,runid):
            _,out,_=docker(work,['ps','--all','--quiet','--no-trunc','--filter','label=eight6.probe.run='+runid],'OWNED_CONTAINER_INVENTORY')
            ids=out.decode('ascii').split();need(all(re.fullmatch('[0-9a-f]{64}',x) for x in ids),'INVENTORY_SHAPE');return ids
@@ -263,6 +327,9 @@ jobs:
             stage=row['Config']['Labels'].get('eight6.probe.stage');need(stage in {'boundary','hashes','version','flags','copy'},'UNOWNED_CONTAINER_STOP')
             need(row['Name']=='/e6-maintained-'+runid+'-'+stage and row['Image']==CONFIG,'CLEANUP_IDENTITY')
             need((work/(stage+'.cid')).read_text().strip()==cid,'CLEANUP_CID_PROVENANCE')
+            try:observed=runpy.run_path(str(Path(__file__).with_name('copy_diagnostics.py')))['state'](row)
+            except (KeyError,TypeError,ValueError):observed={'state_evidence':'UNAVAILABLE'}
+            print('OWNED_CLEANUP_STATE='+json.dumps({'stage':stage,'state':observed},sort_keys=True,separators=(',',':')),flush=True)
             docker(work,['rm','--force',cid],'CLEANUP_REMOVE')
            need(not inventory(work,runid),'CONTAINER_CLEANUP_UNPROVEN')
           def main():
@@ -296,7 +363,7 @@ jobs:
             need(len(out)<=4096,'VERSION_STDOUT_DIAGNOSTIC_BOUND')
             need(out.strip()==b'skopeo version 1.22.3 commit: 92397d5ba399784c6e2f9f229a4244b724743dba','RUNTIME_TOOL_VERSION')
             out,_=run_container(work,'flags',['copy','--help'],runid);need(all(x.encode() in out for x in ['--preserve-digests','--retry-times','--src-authfile','--dest-authfile','--src-tls-verify','--dest-tls-verify','--digestfile']),'REQUIRED_COPY_FLAGS')
-            run_container(work,'copy',['--policy','/input/policy.json','copy','--preserve-digests','--retry-times','0','--src-authfile','/input/empty.json','--dest-authfile','/input/empty.json','oci-archive:/input/frozen.oci.tar','oci:/output/copied:verified'],runid,seconds=180)
+            run_container(work,'copy',['--tmpdir','/output','--policy','/input/policy.json','copy','--preserve-digests','--retry-times','0','--src-authfile','/input/empty.json','--dest-authfile','/input/empty.json','oci-archive:/input/frozen.oci.tar','oci:/output/copied:verified'],runid,seconds=180)
             destination(work/'output/copied');result={'frozen_digest':FROZEN,'exact_blobs':5,'tool_digest':IMAGE,'nonroot_caps0_nnp_seccomp_observed':True,'runner_image_version':os.environ['ImageVersion'],'native_client_version':v['Client']['Version'],'native_server_version':v['Server']['Version']}
             status,code='PASS','MAINTAINED_LOCAL_COPY_REVIEW_REQUIRED'
            except Stop as e:code=str(e)
@@ -312,7 +379,7 @@ jobs:
            return 0 if status=='PASS' and cleanup else 2
           if __name__=='__main__':sys.exit(main())
           E6_MAINTAINED_PROBE
-          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/maintained_probe.py" | /usr/bin/cut -d ' ' -f 1)" = '41789386810c414fde90612767a9e9b3a7901c6381feb12a92c6cb4bcd855651'
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/maintained_probe.py" | /usr/bin/cut -d ' ' -f 1)" = '7014a9891a5446403bc9ee2f5a87babb12667ef1c91882f2208038e6c9911c3e'
       - name: One credential-free maintained container observation
         shell: bash
         run: |
