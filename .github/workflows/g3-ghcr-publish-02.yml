@@ -1,0 +1,1022 @@
+# INACTIVE OFFLINE REVIEW CANDIDATE. NOT INSTALLED. NO AUTHORITY.
+name: G3 exact frozen OCI diagnostic publication 02
+on:
+  workflow_dispatch:
+    inputs:
+      publication_release:
+        required: true
+        type: string
+      publication_release_sha256:
+        required: true
+        type: string
+      reviewed_workflow_sha256:
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: g3-exact-ghcr-publication-02
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: >-
+      github.repository == 'Eight6Admin/eight6-g3-dummy-01' &&
+      github.actor == 'Eight6Admin' && github.ref == 'refs/heads/main' &&
+      github.run_number == 1 && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    env:
+      PUBLICATION_RELEASE: ${{ inputs.publication_release }}
+      PUBLICATION_RELEASE_SHA256: ${{ inputs.publication_release_sha256 }}
+      REVIEWED_WORKFLOW_SHA256: ${{ inputs.reviewed_workflow_sha256 }}
+    steps:
+      - name: Materialise and verify runtime_publisher_02.py
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          umask 077
+          test -d "$RUNNER_TEMP"
+          mkdir -m 700 "$RUNNER_TEMP/e6-ghcr-02-code"
+          cat > "$RUNNER_TEMP/e6-ghcr-02-code/runtime_publisher_02.py" <<'E6_SOURCE_0'
+          """INACTIVE candidate. No execution authority; real credentials are prohibited now.
+          Only the future approved GitHub job may call prepare/publish. Tests use doubles.
+          """
+          import base64, datetime as dt, hashlib, json, os, re, shutil, signal, ssl
+          import stat, subprocess, sys, tarfile, tempfile, time, urllib.error, urllib.request
+          import contextlib, selectors
+          from pathlib import Path
+          
+          REPO='Eight6Admin/eight6-g3-dummy-01'
+          NAME='eight6admin/eight6-g3-dummy-01'
+          IMAGE='sha256:ddac54564d21a1cb2519a34c8b79e6de2bdea11536b69add3b136463aea6dd7d'
+          ARCHIVE_SHA='14A1C05B5B243FB523404CBECC7D08725C1C14FC5D491A9BF5E79C420B731BDA'
+          ARCHIVE_SIZE=86446080
+          ASSET_URL='https://github.com/'+REPO+'/releases/download/g3-dummy-oci-01/starter-dummy.oci.tar'
+          TOOLS={'/usr/bin/skopeo':'1802F4706BB0F3F5A7A43E61C6ECEF2ADCFFF567D454EB0052AEB5769885302C',
+           '/usr/bin/python3':'E50D468E8B0ADFB05733F5B87B3CFF34829C4A8C1AEA50C865AA8BDFE4BB150F',
+           '/usr/bin/bash':'BC5945FEB8BD26203EBFAFEA5CE1878BB2E32CB8FB50AB7AE395CFB1E1AAAEF1',
+           '/usr/bin/curl':'1CCBD3DAE948374BA8EEF1EBDA26C64B783EDE50B463196E53666E0880BDAC60'}
+          BLOBS={'sha256:3707f346abd105dff303edcb9c87b047cdfa398477b99f38ed0824f15d4fec2a':509,
+           'sha256:dd051e1b8c92ff101fa3071ab97ea4924885942f15644e01c3dc095764e863e3':28247982,
+           'sha256:634001330353172b42cc083a51478b1a55d949986fa9ecd18c24c13bb190d065':58179132,
+           'sha256:1809fa5fb190df46a4c3b8af2e403f81c915e219d388b73d0d0f7b19180c4336':3152, IMAGE:720}
+          UTC=dt.timezone.utc
+          class Stop(Exception):pass
+          def need(ok,code):
+           if not ok:raise Stop(code)
+          def digest(data):return hashlib.sha256(data).hexdigest().upper()
+          def filehash(p):
+           h=hashlib.sha256()
+           with open(p,'rb') as f:
+            for b in iter(lambda:f.read(1048576),b''):h.update(b)
+           return h.hexdigest().upper()
+          def pairs(rows):
+           d={}
+           for k,v in rows:
+            need(k not in d,'DUPLICATE_JSON_KEY');d[k]=v
+           return d
+          def loads(raw):return json.loads(raw,object_pairs_hook=pairs)
+          def utc(s):
+           need(type(s)is str and re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ',s),'WINDOW_FORMAT')
+           return dt.datetime.strptime(s,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
+          def gate(r,now=None):
+           now=now or dt.datetime.now(UTC)
+           need(utc(r['start'])<=now<utc(r['expiry']),'OUTSIDE_FIXED_WINDOW')
+          @contextlib.contextmanager
+          def hard_deadline(r,seconds):
+           # Native Linux default SIGALRM terminates THIS Python process even if an HTTP
+           # peer drips headers/body indefinitely. No parent/group/unrelated PID is killed.
+           # Abrupt termination is NOT success; the independent always-step must reconcile
+           # recorded upload boundary and cleanup. No finally/secure-erasure claim on kill.
+           need(sys.platform=='linux' and signal.getitimer(signal.ITIMER_REAL)==(0.0,0.0),'NATIVE_DEADLINE_REQUIRED')
+           remaining=min(seconds,(utc(r['expiry'])-dt.datetime.now(UTC)).total_seconds())
+           need(remaining>0,'HTTP_EXPIRY')
+           previous=signal.signal(signal.SIGALRM,signal.SIG_DFL)
+           signal.setitimer(signal.ITIMER_REAL,remaining)
+           try:yield
+           finally:
+            signal.setitimer(signal.ITIMER_REAL,0);signal.signal(signal.SIGALRM,previous)
+          def validate_release(raw,expected,env,now=None):
+           need(re.fullmatch('[A-F0-9]{64}',expected or '') and digest(raw.encode())==expected,'RELEASE_HASH')
+           r=loads(raw)
+           keys={'schema','attempt','repo','actor','commit','workflow_sha256','run_number','run_attempt','start','expiry','archive_url','archive_sha256','image_digest','tag','credential_exception','exclusive_writer','approval_sha256','independent_review_sha256','public_content_review_sha256','intent_sha256','status','credential_exception_sha256','registry_review_sha256'}
+           need(type(r)is dict and set(r)==keys,'RELEASE_SHAPE')
+           need(r['status']=='OPERATIONAL' and r['credential_exception_sha256']=='B9D66CA3A7DFC547A47E18DABE01F69EC924774E6D62F71BA93D45FBCEC91117' and r['intent_sha256']=='951FC4D0C0A0A162B7A834FAC8ED82E41D5CD37F208D0D98552A66AE550398C7','NEW_AUTHORITY_BINDING')
+           need(r['tag']=='g3-import-02-9d4104c88c4c4369' and r['start']=='2026-11-07T10:00:00Z' and r['expiry']=='2026-11-07T14:00:00Z','NEW_FIXED_INTENT')
+           need(type(r['registry_review_sha256'])is str and re.fullmatch('[A-F0-9]{64}',r['registry_review_sha256']) and len(set(r['registry_review_sha256']))>1,'REGISTRY_REVIEW_BINDING')
+           need(type(r['schema'])is int and r['schema']==1 and r['attempt']=='PHASE3C2_GHCR_IMPORT_02','ATTEMPT')
+           need(r['repo']==REPO and r['actor']=='Eight6Admin','REPOSITORY_ACTOR')
+           need(type(r['run_number'])is int and r['run_number']==1 and type(r['run_attempt'])is int and r['run_attempt']==1,'ONE_FIRST_ATTEMPT')
+           need(re.fullmatch('[0-9a-f]{40}',r['commit']) is not None,'COMMIT')
+           need(r['workflow_sha256']==env.get('REVIEWED_WORKFLOW_SHA256'),'WORKFLOW_HASH')
+           need(r['public_content_review_sha256']=='8AAD1A313A8F0737D310926892E5DD0817B93032F741AA80CE4CA4C7E752DE55','PUBLIC_CONTENT_REVIEW')
+           for k in ['workflow_sha256','approval_sha256','independent_review_sha256','intent_sha256']:
+            need(type(r[k])is str and re.fullmatch('[A-F0-9]{64}',r[k]) and len(set(r[k]))>1,'AUTHORITY_BINDING')
+           need(r['exclusive_writer'] is True and r['credential_exception']=='ONE_JOB_ENV_STDIN_TMPFS_AND_GHCR_READ_TOKEN_EXCHANGE','EXCEPTION_OR_QUIET_WINDOW')
+           need(r['archive_url']==ASSET_URL and r['archive_sha256']==ARCHIVE_SHA and r['image_digest']==IMAGE,'IMAGE_BINDING')
+           need(re.fullmatch(r'g3-import-02-[0-9a-f]{16}',r['tag']) is not None,'UNIQUE_TAG')
+           need(0<(utc(r['expiry'])-utc(r['start'])).total_seconds()<=14400,'MAXIMUM_FOUR_HOURS')
+           for k,v in {'GITHUB_REPOSITORY':REPO,'GITHUB_ACTOR':'Eight6Admin','GITHUB_REF':'refs/heads/main','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_NUMBER':'1','GITHUB_RUN_ATTEMPT':'1','GITHUB_SHA':r['commit'],'GITHUB_WORKFLOW_SHA':r['commit'],'RUNNER_OS':'Linux','RUNNER_ARCH':'X64','ImageVersion':'20261101.360.1'}.items():
+            need(env.get(k)==v,'CONTEXT_'+k)
+           gate(r,now);return r
+          def toolcheck():
+           for p,h in TOOLS.items():need(filehash(p)==h,'TOOL_HASH')
+           need(shutil.which('skopeo')=='/usr/bin/skopeo','TOOL_PATH')
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+           def redirect_request(self,*a,**kw):raise Stop('REGISTRY_REDIRECT')
+          class AssetRedirect(urllib.request.HTTPRedirectHandler):
+           def redirect_request(self,req,fp,code,msg,headers,url):
+            from urllib.parse import urlsplit
+            u=urlsplit(url)
+            need(u.scheme=='https' and u.hostname in {'github.com','release-assets.githubusercontent.com','objects.githubusercontent.com'} and not u.username and not u.password and u.port in (None,443),'ASSET_REDIRECT')
+            return super().redirect_request(req,fp,code,msg,headers,url)
+          def opener(redirect):return urllib.request.build_opener(urllib.request.ProxyHandler({}),redirect,urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+          def download(path,r):
+           deadline=time.monotonic()+240
+           with hard_deadline(r,240),opener(AssetRedirect()).open(ASSET_URL,timeout=20) as response, open(path,'xb') as out:
+            need(response.status==200,'ASSET_STATUS');n=0
+            while True:
+             gate(r);need(time.monotonic()<deadline,'ASSET_DEADLINE')
+             b=response.read(1048576)
+             if not b:break
+             n+=len(b);need(n<=ARCHIVE_SIZE,'ASSET_OVERSIZE');out.write(b)
+           need(n==ARCHIVE_SIZE and filehash(path)==ARCHIVE_SHA,'ARCHIVE_BYTES')
+          def verify_archive(path):
+           need(Path(path).stat().st_size==ARCHIVE_SIZE and filehash(path)==ARCHIVE_SHA,'ARCHIVE_BYTES')
+           with tarfile.open(path,'r:') as t:
+            names=t.getnames();need(len(names)==len(set(names)),'ARCHIVE_DUPLICATES')
+            want={'oci-layout','index.json'}|{'blobs/sha256/'+d.split(':')[1] for d in BLOBS}
+            need(set(names)==want,'ARCHIVE_INVENTORY')
+            for name in names:need(t.getmember(name).isfile(),'ARCHIVE_MEMBER_TYPE')
+            idx=loads(t.extractfile('index.json').read())
+            need(len(idx['manifests'])==1 and idx['manifests'][0]['digest']==IMAGE,'SINGLE_MANIFEST')
+            for d,size in BLOBS.items():
+             b=t.extractfile('blobs/sha256/'+d.split(':')[1]).read(size+1)
+             need(len(b)==size and 'sha256:'+digest(b).lower()==d,'SOURCE_BLOB')
+          def child(argv,env,r,stdin=None,seconds=120):
+           gate(r);seconds=min(seconds,(utc(r['expiry'])-dt.datetime.now(UTC)).total_seconds())
+           need(seconds>0,'CHILD_EXPIRY')
+           p=subprocess.Popen(argv,stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,start_new_session=True)
+           deadline=time.monotonic()+seconds;out=bytearray();err=bytearray();offset=0
+           sel=None
+           try:
+            sel=selectors.DefaultSelector()
+            for stream,kind in [(p.stdout,'out'),(p.stderr,'err')]:os.set_blocking(stream.fileno(),False);sel.register(stream,selectors.EVENT_READ,kind)
+            if stdin is not None:os.set_blocking(p.stdin.fileno(),False);sel.register(p.stdin,selectors.EVENT_WRITE,'in')
+            while sel.get_map():
+             left=deadline-time.monotonic();need(left>0,'CHILD_ABSOLUTE_DEADLINE')
+             for key,_ in sel.select(min(left,0.25)):
+              if key.data=='in':
+               offset+=os.write(key.fileobj.fileno(),stdin[offset:])
+               if offset==len(stdin):sel.unregister(key.fileobj);key.fileobj.close()
+              else:
+               chunk=os.read(key.fileobj.fileno(),65536)
+               if not chunk:sel.unregister(key.fileobj);key.fileobj.close();continue
+               need(len(out)+len(err)+len(chunk)<=2097152,'TOOL_OUTPUT_OVERSIZE')
+               (out if key.data=='out' else err).extend(chunk)
+            p.wait(timeout=max(0.001,deadline-time.monotonic()))
+           except BaseException:
+            try:os.killpg(p.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+            p.wait(timeout=2);raise Stop('CHILD_TIMEOUT_OUTPUT_OR_CLOSURE_UNKNOWN')
+           finally:
+            if sel is not None:sel.close()
+            for stream in [p.stdin,p.stdout,p.stderr]:
+             if stream is not None and not stream.closed:stream.close()
+           gate(r);need(p.returncode==0,'TOOL_FAILURE');return bytes(out)
+          def http(path,headers,r,limit=65536):
+           gate(r);req=urllib.request.Request('https://ghcr.io'+path,headers=headers)
+           with hard_deadline(r,20):
+            try:
+             with opener(NoRedirect()).open(req,timeout=20) as response:result=(response.status,dict(response.headers),response.read(limit+1))
+            except urllib.error.HTTPError as e:result=(e.code,dict(e.headers),e.read(limit+1))
+           gate(r);need(len(result[2])<=limit,'REGISTRY_RESPONSE_OVERSIZE');return result
+          def bearer_for_read(token,r):
+           # Proposed extra narrow read-auth exchange; credential header only to fixed GHCR HTTPS endpoint.
+           basic=base64.b64encode(('Eight6Admin:'+token).encode()).decode()
+           status,headers,body=http('/token?service=ghcr.io&scope=repository%3A'+NAME.replace('/','%2F')+'%3Apull',{'Authorization':'Basic '+basic},r)
+           need(status==200,'REGISTRY_READ_AUTH_FAILED');reply=loads(body)
+           bearer=reply.get('token',reply.get('access_token'))
+           need(type(bearer)is str and 10<len(bearer)<32768 and not re.search(r'[\r\n]',bearer),'REGISTRY_READ_TOKEN')
+           return bearer
+          def absence(status,body,code):
+           need(status==404,'DESTINATION_NOT_ABSENT')
+           obj=loads(body)
+           need(type(obj)is dict and set(obj)=={'errors'} and type(obj['errors'])is list and len(obj['errors'])==1,'ABSENCE_RESPONSE_SHAPE')
+           err=obj['errors'][0]
+           need(type(err)is dict and err.get('code')==code and set(err)<= {'code','message','detail'},'ABSENCE_NOT_RECOGNISED')
+          def check_absent(bearer,r):
+           h={'Authorization':'Bearer '+bearer,'Accept':'application/vnd.oci.image.manifest.v1+json'}
+           status,_,body=http('/v2/'+NAME+'/tags/list',h,r)
+           # Do not adopt an existing package. Fresh package absence required, not just fresh-tag absence.
+           absence(status,body,'NAME_UNKNOWN')
+           status,_,body=http('/v2/'+NAME+'/manifests/'+r['tag'],h,r)
+           absence(status,body,'MANIFEST_UNKNOWN')
+          def remote_manifest(bearer,r):
+           status,_,body=http('/v2/'+NAME+'/manifests/'+IMAGE,{'Authorization':'Bearer '+bearer,'Accept':'application/vnd.oci.image.manifest.v1+json'},r,1048576)
+           need(status==200 and 'sha256:'+digest(body).lower()==IMAGE,'REMOTE_RAW_MANIFEST')
+          def pulled_blobs(path):
+           b=Path(path)/'blobs/sha256'
+           need(b.is_dir() and {x.name for x in b.iterdir()}=={d.split(':')[1] for d in BLOBS},'REMOTE_BLOB_INVENTORY')
+           for d,size in BLOBS.items():
+            p=b/d.split(':')[1]
+            need(p.is_file() and not p.is_symlink() and p.stat().st_size==size and filehash(p)==d.split(':')[1].upper(),'REMOTE_BLOB_BYTES')
+          def ram_boundary(path):
+           mounts=Path('/proc/mounts').read_text().splitlines()
+           need(any(x.split()[1:3]==['/dev/shm','tmpfs'] for x in mounts),'TMPFS_REQUIRED')
+           s=os.lstat(path);need(stat.S_ISDIR(s.st_mode) and s.st_uid==os.getuid() and stat.S_IMODE(s.st_mode)==0o700,'RAM_DIRECTORY_BOUNDARY')
+          def auth_boundary(path):
+           s=os.lstat(path);need(stat.S_ISREG(s.st_mode) and s.st_uid==os.getuid() and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o600,'AUTHFILE_BOUNDARY')
+          def context():
+           r=validate_release(os.environ.get('PUBLICATION_RELEASE',''),os.environ.get('PUBLICATION_RELEASE_SHA256',''),os.environ)
+           toolcheck()
+           source='https://raw.githubusercontent.com/'+REPO+'/'+r['commit']+'/.github/workflows/g3-ghcr-publish-02.yml'
+           with hard_deadline(r,20),opener(NoRedirect()).open(source,timeout=20) as response:
+            need(response.status==200,'INSTALLED_WORKFLOW_STATUS');raw=response.read(131073)
+           need(len(raw)<=131072 and digest(raw)==r['workflow_sha256'],'INSTALLED_WORKFLOW_BYTES')
+           gate(r);return r
+          def workspace():
+           p=Path(os.environ['RUNNER_TEMP'])/'e6-ghcr-import-02'
+           need(p.is_dir() and not p.is_symlink() and p.stat().st_uid==os.getuid(),'WORKSPACE_BOUNDARY');return p
+          def local_smoke(p,r):
+           ram=Path(tempfile.mkdtemp(prefix='e6-ghcr-',dir='/dev/shm'));ram_boundary(ram)
+           (p/'ram-path').write_text(str(ram))
+           try:
+            home=ram/'home';home.mkdir(mode=0o700)
+            auth=ram/'empty.json';auth.write_text('{"auths":{}}');auth.chmod(0o600)
+            env={'PATH':'/usr/bin:/bin','HOME':str(home),'XDG_CONFIG_HOME':str(home),'XDG_RUNTIME_DIR':str(home),'REGISTRY_AUTH_FILE':str(auth),'LANG':'C.UTF-8'}
+            child(['/usr/bin/skopeo','copy','--preserve-digests','--retry-times','0','--src-authfile',str(auth),'--dest-authfile',str(auth),'oci-archive:'+str(p/'starter-dummy.oci.tar'),'oci:'+str(p/'local-smoke')+':verified'],env,r,seconds=180)
+            pulled_blobs(p/'local-smoke');gate(r)
+           finally:
+            shutil.rmtree(ram);need(not ram.exists(),'AUTH_CLEANUP_UNVERIFIED')
+           print('LOCAL_SMOKE=EXACT_MANIFEST_AND_ALL_BLOBS_VERIFIED_NO_CREDENTIAL')
+          
+          def prepare():
+           r=context();p=Path(os.environ['RUNNER_TEMP'])/'e6-ghcr-import-02'
+           p.mkdir(mode=0o700,exist_ok=False)
+           with (p/'one-use.claim').open('x') as f:f.write(os.environ['GITHUB_RUN_ID'])
+           download(p/'starter-dummy.oci.tar',r);verify_archive(p/'starter-dummy.oci.tar');local_smoke(p,r)
+           print('PREPARE=EXACT_ARCHIVE_TOOLS_CONTEXT_VERIFIED')
+          def publish():
+           # The job token exists only in this proposed credential-consuming step environment.
+           token=None
+           ram=None;mutated=False;verified=False;cleanup=False
+           try:
+            r=context();p=workspace();verify_archive(p/'starter-dummy.oci.tar')
+            need((p/'one-use.claim').read_text()==os.environ['GITHUB_RUN_ID'],'CLAIM_BINDING')
+            with (p/'publication-consumed.claim').open('x') as f:f.write(os.environ['GITHUB_RUN_ID'])
+            import resource
+            resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+            token=os.environ.pop('GH_PUBLISH_TOKEN',None)
+            need(type(token)is str and 10<len(token)<32768 and not re.search(r'[\r\n]',token),'TOKEN_INPUT')
+            os.umask(0o077);ram=Path(tempfile.mkdtemp(prefix='e6-ghcr-',dir='/dev/shm'));ram_boundary(ram)
+            (p/'ram-path').write_text(str(ram))
+            home=ram/'home';home.mkdir(mode=0o700);auth=ram/'auth.json'
+            env={'PATH':'/usr/bin:/bin','HOME':str(home),'XDG_CONFIG_HOME':str(home),'XDG_RUNTIME_DIR':str(home),'REGISTRY_AUTH_FILE':str(auth),'LANG':'C.UTF-8'}
+            version=child(['/usr/bin/skopeo','--version'],env,r,seconds=10)
+            need(version==b'skopeo version 1.13.3\n','TOOL_VERSION')
+            child(['/usr/bin/skopeo','login','--authfile',str(auth),'--username','Eight6Admin','--password-stdin','--tls-verify=true','ghcr.io'],env,r,token.encode(),30)
+            auth_boundary(auth);bearer=bearer_for_read(token,r);token=None
+            check_absent(bearer,r);gate(r)
+            # From this point any failure or lost acknowledgement is UNKNOWN; never retry/delete.
+            with (p/'upload-may-have-started.claim').open('x') as f:f.write(os.environ['GITHUB_RUN_ID'])
+            print('BOUNDARY=UPLOAD_MAY_BEGIN_ANY_UNVERIFIED_OUTCOME_IS_UNKNOWN',flush=True)
+            mutated=True
+            child(['/usr/bin/skopeo','copy','--preserve-digests','--retry-times','0','--dest-tls-verify=true','--dest-authfile',str(auth),'--digestfile',str(p/'uploaded.digest'),'oci-archive:'+str(p/'starter-dummy.oci.tar'),'docker://ghcr.io/'+NAME+':'+r['tag']],env,r,seconds=300)
+            need((p/'uploaded.digest').read_text().strip()==IMAGE,'UPLOAD_DIGESTFILE')
+            remote_manifest(bearer,r);bearer=None
+            child(['/usr/bin/skopeo','copy','--preserve-digests','--retry-times','0','--src-tls-verify=true','--src-authfile',str(auth),'docker://ghcr.io/'+NAME+'@'+IMAGE,'oci:'+str(p/'verified-pull')+':verified'],env,r,seconds=180)
+            pulled_blobs(p/'verified-pull');gate(r);verified=True
+           finally:
+            token=None;os.environ.pop('GH_PUBLISH_TOKEN',None)
+            try:
+             if ram is not None:shutil.rmtree(ram);need(not ram.exists(),'AUTH_CLEANUP_UNVERIFIED')
+             cleanup=True
+            finally:
+             # Even a cleanup exception after upload must retain the UNKNOWN boundary.
+             if not (verified and cleanup):print('OUTCOME=UNKNOWN_NO_RETRY' if mutated else 'OUTCOME=STOP_BEFORE_UPLOAD')
+           print('OUTCOME=AUTHENTICATED_MANIFEST_AND_ALL_BLOBS_MATCH_REVIEW_REQUIRED')
+           print('CLEANUP=TEMPORARY_AUTH_PATH_REMOVED_NOT_SECURE_ERASURE')
+           print('PUBLIC_VISIBILITY=NOT_VERIFIED_SEPARATE_GATE')
+          def cleanup():
+           # Always-step fallback, never scans/deletes arbitrary /dev/shm or unrelated paths.
+           p=workspace();marker=p/'ram-path'
+           if (p/'upload-may-have-started.claim').exists():print('UPLOAD_BOUNDARY=RECONCILE_NO_RETRY_NO_ROLLBACK_ASSUMPTION')
+           if marker.exists():
+            ram=Path(marker.read_text())
+            need(ram.parent==Path('/dev/shm') and re.fullmatch(r'e6-ghcr-[a-z0-9_]{8}',ram.name),'CLEANUP_PATH')
+            if ram.exists():ram_boundary(ram);shutil.rmtree(ram)
+            need(not ram.exists(),'AUTH_CLEANUP_UNVERIFIED')
+           print('CLEANUP=RECORDED_TEMPORARY_AUTH_PATH_ABSENT')
+          def anonymous():
+           # Separate future Founder operation, no release/publication progression from publish().
+           need(not any(k in os.environ for k in ['GH_PUBLISH_TOKEN','GITHUB_TOKEN','ACTIONS_RUNTIME_TOKEN']),'ANONYMOUS_CONTEXT_HAS_TOKEN')
+           toolcheck();r=context();p=workspace();ram=None
+           try:
+            os.umask(0o077);ram=Path(tempfile.mkdtemp(prefix='e6-anon-',dir='/dev/shm'));ram_boundary(ram)
+            auth=ram/'empty.json';auth.write_text('{"auths":{}}');auth.chmod(0o600)
+            env={'PATH':'/usr/bin:/bin','HOME':str(ram),'XDG_CONFIG_HOME':str(ram),'XDG_RUNTIME_DIR':str(ram),'REGISTRY_AUTH_FILE':str(auth),'LANG':'C.UTF-8'}
+            child(['/usr/bin/skopeo','copy','--preserve-digests','--retry-times','0','--src-no-creds','--src-tls-verify=true','--src-authfile',str(auth),'docker://ghcr.io/'+NAME+'@'+IMAGE,'oci:'+str(p/'anonymous-pull')+':verified'],env,r,seconds=180)
+            pulled_blobs(p/'anonymous-pull')
+           finally:
+            if ram is not None:shutil.rmtree(ram)
+           print('ANONYMOUS=EXACT_MANIFEST_AND_ALL_BLOBS_MATCH_REVIEW_REQUIRED')
+          def main():
+           try:
+            need(sys.argv[1:] in [['prepare'],['publish'],['cleanup']],'MODE_NOT_AUTHORISED')
+            {'prepare':prepare,'publish':publish,'cleanup':cleanup}[sys.argv[1]]()
+           except BaseException:
+            print('RESULT=NOT_ACCEPTED_STOP_NO_RETRY');return 2
+           return 0
+          if __name__=='__main__':sys.exit(main())
+          E6_SOURCE_0
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/runtime_publisher_02.py" | /usr/bin/cut -d ' ' -f 1)" = "aeffb81e9293f14ec341c49b72c988d0a24c3f41bb313f38b68c0cbb254ccd24"
+      - name: Materialise and verify diagnostics.py
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          umask 077
+          cat > "$RUNNER_TEMP/e6-ghcr-02-code/diagnostics.py" <<'E6_SOURCE_1'
+          """Finite durable telemetry candidate. No free-text or credential fields."""
+          import fcntl
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import stat
+          
+          OPERATIONS = {'VALIDATION', 'PREPARE', 'PUBLISH', 'TOOL_VERSION', 'AUTH_LOGIN',
+                        'AUTH_READ', 'REGISTRY_ABSENCE', 'HTTP_TOKEN', 'HTTP_TAGS',
+                        'HTTP_MANIFEST', 'UPLOAD_COPY', 'MANIFEST_READBACK', 'BLOB_PULL',
+                        'BLOB_VERIFY', 'CLEANUP', 'BOUNDARY', 'LOCAL_SMOKE'}
+          OPERATIONS.update({'ONE_USE_CLAIM', 'AUTH_SETUP', 'UPLOAD_DIGEST'})
+          EVENTS = {'ENTER', 'EXIT', 'FAIL', 'CHILD_STARTED', 'CHILD_EXIT', 'HTTP_RESULT', 'BOUNDARY'}
+          KEYS = {'sequence', 'operation', 'event', 'code', 'return_code', 'http_status',
+                  'child_spawned', 'child_closed', 'upload_possible', 'binding'}
+          
+          
+          class InvalidJournal(Exception):
+              pass
+          
+          
+          def validate(rows, allowed_codes, expected_binding):
+              if type(expected_binding) is not str or re.fullmatch('[A-F0-9]{64}', expected_binding) is None:
+                  raise InvalidJournal('JOURNAL_INVALID')
+              previous_boundary = False
+              stack = []
+              for index, row in enumerate(rows, 1):
+                  if (type(row) is not dict or set(row) != KEYS
+                          or type(row['sequence']) is not int or row['sequence'] != index
+                          or type(row['operation']) is not str or row['operation'] not in OPERATIONS
+                          or type(row['event']) is not str or row['event'] not in EVENTS
+                          or type(row['code']) is not str or row['code'] not in allowed_codes
+                          or row['binding'] != expected_binding
+                          or type(row['upload_possible']) is not bool
+                          or (previous_boundary and not row['upload_possible'])):
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  for key in ['child_spawned', 'child_closed']:
+                      if row[key] is not None and type(row[key]) is not bool:
+                          raise InvalidJournal('JOURNAL_INVALID')
+                  rc = row['return_code']
+                  if rc is not None and (type(rc) is not int or not -128 <= rc <= 255):
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  status = row['http_status']
+                  if status is not None and (type(status) is not int or not 100 <= status <= 599):
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  if row['event'] == 'CHILD_EXIT' and (rc is None or row['child_closed'] is not True):
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  if row['event'] == 'CHILD_STARTED' and row['child_spawned'] is not True:
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  if row['event'] == 'HTTP_RESULT' and status is None:
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  operation = row['operation']; event = row['event']
+                  if ((event == 'FAIL' and row['code'] == 'NONE')
+                          or (event != 'FAIL' and row['code'] != 'NONE')
+                          or (event != 'CHILD_EXIT' and rc is not None)
+                          or (event != 'HTTP_RESULT' and status is not None)
+                          or (event not in {'CHILD_STARTED', 'CHILD_EXIT'} and row['child_spawned'] is not None)
+                          or (event != 'CHILD_EXIT' and row['child_closed'] is not None)):
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  if event == 'ENTER':
+                      if operation in {frame['operation'] for frame in stack}:
+                          raise InvalidJournal('JOURNAL_INVALID')
+                      stack.append(dict(operation=operation, started=False, exited=False))
+                  elif event == 'BOUNDARY':
+                      if (operation != 'BOUNDARY' or not row['upload_possible'] or not stack
+                              or stack[-1]['operation'] not in {'BOUNDARY', 'UPLOAD_COPY'}):
+                          raise InvalidJournal('JOURNAL_INVALID')
+                  else:
+                      if not stack or stack[-1]['operation'] != operation:
+                          raise InvalidJournal('JOURNAL_INVALID')
+                      frame = stack[-1]
+                      if event == 'CHILD_STARTED':
+                          if frame['started']:
+                              raise InvalidJournal('JOURNAL_INVALID')
+                          frame['started'] = True
+                      elif event == 'CHILD_EXIT':
+                          if not frame['started'] or frame['exited']:
+                              raise InvalidJournal('JOURNAL_INVALID')
+                          frame['exited'] = True
+                      elif event in {'EXIT', 'FAIL'}:
+                          if event == 'EXIT' and operation in {'TOOL_VERSION', 'AUTH_LOGIN', 'UPLOAD_COPY', 'BLOB_PULL', 'LOCAL_SMOKE'}:
+                              if not frame['started'] or not frame['exited']:
+                                  raise InvalidJournal('JOURNAL_INVALID')
+                          stack.pop()
+                  previous_boundary = row['upload_possible']
+              if len(rows) > 128:
+                  raise InvalidJournal('JOURNAL_INVALID')
+              return rows
+          
+          
+          def require_publish_success(rows, allowed_codes, expected_binding, initial_count=0):
+              validate(rows, allowed_codes, expected_binding)
+              expected = ['PUBLISH', 'VALIDATION', 'ONE_USE_CLAIM', 'AUTH_SETUP', 'TOOL_VERSION',
+                          'AUTH_LOGIN', 'AUTH_READ', 'HTTP_TOKEN', 'REGISTRY_ABSENCE',
+                          'HTTP_TAGS', 'HTTP_MANIFEST', 'BOUNDARY', 'UPLOAD_COPY', 'UPLOAD_DIGEST',
+                          'MANIFEST_READBACK', 'HTTP_MANIFEST', 'BLOB_PULL', 'BLOB_VERIFY', 'CLEANUP']
+              if type(initial_count) is not int or not 0 <= initial_count < len(rows):
+                  raise InvalidJournal('JOURNAL_INVALID')
+              prefix = rows[:initial_count]
+              if (any(r['operation'] == 'PUBLISH' for r in prefix)
+                      or sum(r['event'] == 'ENTER' for r in prefix) !=
+                         sum(r['event'] in {'EXIT', 'FAIL'} for r in prefix)):
+                  raise InvalidJournal('JOURNAL_INVALID')
+              start = initial_count
+              end = len(rows) - 1
+              if (rows[start]['operation'], rows[start]['event']) != ('PUBLISH', 'ENTER') or (rows[end]['operation'], rows[end]['event']) != ('PUBLISH', 'EXIT'):
+                  raise InvalidJournal('JOURNAL_INVALID')
+              span = rows[start:end + 1]
+              boundary_indices = [i for i, r in enumerate(span) if r['event'] == 'BOUNDARY']
+              upload_spawn = [i for i, r in enumerate(span) if r['operation'] == 'UPLOAD_COPY' and r['event'] == 'CHILD_STARTED']
+              first_possible = next((i for i, r in enumerate(span) if r['upload_possible']), None)
+              if (len(boundary_indices) != 2 or len(upload_spawn) != 1
+                      or first_possible != boundary_indices[0]
+                      or not boundary_indices[0] < boundary_indices[1] < upload_spawn[0]
+                      or span[boundary_indices[0] - 1]['operation'] != 'BOUNDARY'
+                      or span[boundary_indices[0] - 1]['event'] != 'ENTER'
+                      or span[boundary_indices[1] - 1]['operation'] != 'UPLOAD_COPY'
+                      or span[boundary_indices[1] - 1]['event'] != 'ENTER'):
+                  raise InvalidJournal('JOURNAL_INVALID')
+              if ([r['operation'] for r in span if r['event'] == 'ENTER'] != expected
+                      or any(r['event'] == 'FAIL' for r in rows)
+                      or any(r['return_code'] != 0 for r in span if r['event'] == 'CHILD_EXIT')
+                      or [r['http_status'] for r in span if r['event'] == 'HTTP_RESULT'] != [200, 404, 404, 200]
+                      or len([r for r in span if r['event'] == 'EXIT']) != len(expected)):
+                  raise InvalidJournal('JOURNAL_INVALID')
+              return True
+          
+          
+          def load_line(line):
+              def pairs(values):
+                  output = {}
+                  for key, value in values:
+                      if key in output:
+                          raise InvalidJournal('JOURNAL_INVALID')
+                      output[key] = value
+                  return output
+              return json.loads(line, object_pairs_hook=pairs)
+          
+          
+          class Journal:
+              def __init__(self, root, allowed_codes, binding):
+                  self.root = Path(root)
+                  self.codes = set(allowed_codes)
+                  self.binding = binding
+                  if not self.root.is_dir() or self.root.is_symlink() or self.root.stat().st_uid != os.getuid():
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  self.path = self.root / 'finite-diagnostics.jsonl'
+          
+              def _open(self):
+                  flags = os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW
+                  # Missing evidence must not silently become a new sequence at publish/cleanup.
+                  fd = os.open(self.path, flags)
+                  s = os.fstat(fd)
+                  if (not stat.S_ISREG(s.st_mode) or s.st_uid != os.getuid()
+                          or s.st_nlink != 1 or stat.S_IMODE(s.st_mode) != 0o600 or s.st_size > 65536):
+                      os.close(fd)
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  try:
+                      fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                  except BaseException:
+                      os.close(fd)
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  return fd
+          
+              def initialize(self):
+                  # Only the separate preparation controller may create the journal once.
+                  fd = os.open(self.path, os.O_WRONLY | os.O_NOFOLLOW | os.O_CREAT | os.O_EXCL, 0o600)
+                  try:
+                      os.fsync(fd)
+                  finally:
+                      os.close(fd)
+                  directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+                  try:
+                      os.fsync(directory)
+                  finally:
+                      os.close(directory)
+          
+              def emit(self, operation, event, code='NONE', return_code=None, http_status=None,
+                       child_spawned=None, child_closed=None, boundary=False):
+                  fd = self._open()
+                  try:
+                      os.lseek(fd, 0, os.SEEK_SET)
+                      data = os.read(fd, 65537)
+                      if len(data) > 65536 or (data and not data.endswith(b'\n')):
+                          raise InvalidJournal('JOURNAL_INVALID')
+                      rows = [load_line(line) for line in data.splitlines()]
+                      validate(rows, self.codes, self.binding)
+                      # Claim presence is conservative cross-process evidence; never downgrade.
+                      claim = self.root / 'e6-ghcr-import-02/upload-may-have-started.claim'
+                      possible = boundary or claim.exists() or bool(rows and rows[-1]['upload_possible'])
+                      row = dict(sequence=len(rows) + 1, operation=operation, event=event, code=code,
+                                 return_code=return_code, http_status=http_status,
+                                 child_spawned=child_spawned, child_closed=child_closed,
+                                 upload_possible=bool(possible), binding=self.binding)
+                      validate(rows + [row], self.codes, self.binding)
+                      encoded = json.dumps(row, separators=(',', ':'), ensure_ascii=True).encode('ascii')
+                      if len(encoded) > 512 or len(data) + len(encoded) + 1 > 65536:
+                          raise InvalidJournal('JOURNAL_INVALID')
+                      written = os.write(fd, encoded + b'\n')
+                      if written != len(encoded) + 1:
+                          raise InvalidJournal('JOURNAL_INVALID')
+                      os.fsync(fd)
+                      print('DIAGNOSTIC=' + encoded.decode('ascii'), flush=True)
+                      return row
+                  finally:
+                      os.close(fd)
+          
+              def read(self):
+                  fd = self._open()
+                  try:
+                      os.lseek(fd, 0, os.SEEK_SET)
+                      data = os.read(fd, 65537)
+                      if len(data) > 65536 or (data and not data.endswith(b'\n')):
+                          raise InvalidJournal('JOURNAL_INVALID')
+                      return validate([load_line(x) for x in data.splitlines()], self.codes, self.binding)
+                  finally:
+                      os.close(fd)
+          E6_SOURCE_1
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/diagnostics.py" | /usr/bin/cut -d ' ' -f 1)" = "903e481d0b3017cf0891893432c895cfd77f614cad2cf2f39e70b7baaeb3a54d"
+      - name: Materialise and verify publisher_candidate.py
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          umask 077
+          cat > "$RUNNER_TEMP/e6-ghcr-02-code/publisher_candidate.py" <<'E6_SOURCE_2'
+          """INACTIVE candidate: instrumentation over an exact unchanged frozen publisher.
+          
+          No operational entrypoint or release is granted. Tests use isolated fixtures.
+          The original attempt remains consumed. No runtime can activate via environment.
+          """
+          import sys
+          if __name__ == '__main__':
+              # Hard inactive before importing any publisher, journal or credential path.
+              print('INACTIVE_CANDIDATE_NO_OPERATIONAL_AUTHORITY')
+              raise SystemExit(2)
+          
+          import ast
+          import contextlib
+          import hashlib
+          import importlib.util
+          import os
+          from pathlib import Path
+          import selectors
+          import shutil
+          import signal
+          import subprocess
+          import sys
+          import time
+          import tempfile
+          from diagnostics import Journal, InvalidJournal, require_publish_success
+          
+          SOURCE = Path(__file__).with_name('runtime_publisher_02.py')
+          if hashlib.sha256(SOURCE.read_bytes()).hexdigest().upper() != 'AEFFB81E9293F14EC341C49B72C988D0A24C3F41BB313F38B68C0CBB254CCD24':
+              raise RuntimeError('FROZEN_SOURCE_MISMATCH')
+          spec = importlib.util.spec_from_file_location('exact_frozen_publisher', SOURCE)
+          base = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(base)
+          SAFE_CODES = {'NONE', 'NATIVE_NONZERO', 'NATIVE_SIGNAL', 'CHILD_START_FAILED',
+                        'CHILD_DEADLINE', 'CHILD_OUTPUT_LIMIT', 'CHILD_CLOSURE_UNVERIFIED',
+                        'UNEXPECTED_FAILURE', 'JOURNAL_INVALID', 'LOCAL_SMOKE_FAILED'}
+          SAFE_CODES.update({'TOOL_TEXT_OPTION', 'TOOL_TEXT_POLICY', 'TOOL_TEXT_AUTH', 'TOOL_TEXT_5XX'})
+          # These are static, approved source guard strings, never tool/error messages.
+          for node in ast.walk(ast.parse(SOURCE.read_text())):
+              if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                      and node.func.id == 'need' and len(node.args) > 1
+                      and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+                  SAFE_CODES.add(node.args[1].value)
+          SAFE_CODES.update('CONTEXT_' + key for key in ['GITHUB_REPOSITORY', 'GITHUB_ACTOR',
+              'GITHUB_REF', 'GITHUB_EVENT_NAME', 'GITHUB_RUN_NUMBER', 'GITHUB_RUN_ATTEMPT',
+              'GITHUB_SHA', 'GITHUB_WORKFLOW_SHA', 'RUNNER_OS', 'RUNNER_ARCH', 'ImageVersion'])
+          
+          
+          class NativeFailure(base.Stop):
+              def __init__(self, code, return_code=None):
+                  super().__init__(code)
+                  self.code = code
+                  self.return_code = return_code
+          
+          
+          def tool_text_hint(data):
+              """Closed coarse text hint only, NEVER actual HTTP status or proven cause.
+          
+              The complete capped tool text stays in RAM. Unknown text is not persisted,
+              hashed, redacted-and-echoed or used to authorise repair/retry/acceptance.
+              """
+              for needles, code in [
+                  ((b'unknown flag:',), 'TOOL_TEXT_OPTION'),
+                  ((b'Error loading trust policy:',), 'TOOL_TEXT_POLICY'),
+                  ((b'unauthorized:', b'denied:'), 'TOOL_TEXT_AUTH'),
+                  ((b'503 Service Unavailable', b'502 Bad Gateway', b'500 Internal Server Error'), 'TOOL_TEXT_5XX'),
+              ]:
+                  if any(needle in data for needle in needles):
+                      return code
+              return 'NATIVE_NONZERO'
+          
+          
+          def journal():
+              return Journal(os.environ['RUNNER_TEMP'], SAFE_CODES, binding())
+          
+          
+          def binding():
+              """Bind non-secret identity, NOT authority; original context still validates it.
+          
+              No expiry gate here: best-effort cleanup telemetry must work after expiry.
+              Original execution time/actor/source/tool/release gates remain in context().
+              """
+              raw = os.environ.get('PUBLICATION_RELEASE', '')
+              release_hash = os.environ.get('PUBLICATION_RELEASE_SHA256', '')
+              workflow_hash = os.environ.get('REVIEWED_WORKFLOW_SHA256', '')
+              run_id = os.environ.get('GITHUB_RUN_ID', '')
+              if (len(raw) > 65536 or base.re.fullmatch('[A-F0-9]{64}', release_hash) is None
+                      or base.re.fullmatch('[A-F0-9]{64}', workflow_hash) is None
+                      or base.re.fullmatch('[0-9]{1,20}', run_id) is None
+                      or base.digest(raw.encode()) != release_hash):
+                  raise InvalidJournal('JOURNAL_INVALID')
+              data = base.loads(raw)
+              intent_hash = data.get('intent_sha256') if type(data) is dict else None
+              if type(intent_hash) is not str or base.re.fullmatch('[A-F0-9]{64}', intent_hash) is None:
+                  raise InvalidJournal('JOURNAL_INVALID')
+              identity = dict(run_id=run_id, release_sha256=release_hash,
+                  workflow_sha256=workflow_hash, intent_sha256=intent_hash,
+                  candidate_source_sha256=base.filehash(Path(__file__)),
+                  frozen_source_sha256=base.filehash(SOURCE))
+              return base.digest(base.json.dumps(identity, sort_keys=True, separators=(',', ':')).encode())
+          
+          
+          def code_for(error):
+              if type(error) is NativeFailure:
+                  return error.code if error.code in SAFE_CODES else 'UNEXPECTED_FAILURE'
+              if type(error) is base.Stop and len(error.args) == 1 and type(error.args[0]) is str:
+                  if error.args[0] in SAFE_CODES:
+                      return next(value for value in SAFE_CODES if value == error.args[0])
+              if isinstance(error, InvalidJournal):
+                  return 'JOURNAL_INVALID'
+              return 'UNEXPECTED_FAILURE'
+          
+          
+          @contextlib.contextmanager
+          def phase(operation):
+              journal().emit(operation, 'ENTER')
+              try:
+                  yield
+              except BaseException as error:
+                  journal().emit(operation, 'FAIL', code_for(error))
+                  raise
+              else:
+                  journal().emit(operation, 'EXIT')
+          
+          
+          @contextlib.contextmanager
+          def unconditional_cleanup():
+              unavailable = False
+              entered = False
+              try:
+                  journal().emit('CLEANUP', 'ENTER'); entered = True
+              except BaseException:
+                  unavailable = True
+              try:
+                  yield
+              except BaseException as error:
+                  if entered:
+                      try:
+                          journal().emit('CLEANUP', 'FAIL', code_for(error))
+                      except BaseException:
+                          unavailable = True
+                  if unavailable:
+                      print('DIAGNOSTIC=UNAVAILABLE_OUTCOME_UNKNOWN_NO_RETRY', flush=True)
+                  raise
+              else:
+                  if entered:
+                      try:
+                          journal().emit('CLEANUP', 'EXIT')
+                      except BaseException:
+                          unavailable = True
+                  if unavailable:
+                      print('DIAGNOSTIC=UNAVAILABLE_OUTCOME_UNKNOWN_NO_RETRY', flush=True)
+                      raise InvalidJournal('JOURNAL_INVALID')
+          
+          
+          def wrap_cleanup(function):
+              def wrapped(*args, **kwargs):
+                  with unconditional_cleanup():
+                      return function(*args, **kwargs)
+              return wrapped
+          
+          
+          def operation_for(argv):
+              if argv[:2] == ['/usr/bin/skopeo', '--version']:
+                  return 'TOOL_VERSION'
+              if argv[:2] == ['/usr/bin/skopeo', 'login']:
+                  return 'AUTH_LOGIN'
+              if argv[:2] == ['/usr/bin/skopeo', 'copy']:
+                  if any(x.startswith('oci-archive:') for x in argv) and any(x.startswith('oci:') for x in argv):
+                      return 'LOCAL_SMOKE'
+                  return 'UPLOAD_COPY' if any(x.startswith('oci-archive:') for x in argv) else 'BLOB_PULL'
+              raise NativeFailure('UNEXPECTED_FAILURE')
+          
+          
+          def observed_child(argv, env, r, stdin=None, seconds=120):
+              operation = operation_for(argv)
+              with phase(operation):
+                  base.gate(r)
+                  seconds = min(seconds, (base.utc(r['expiry']) - base.dt.datetime.now(base.UTC)).total_seconds())
+                  base.need(seconds > 0, 'CHILD_EXPIRY')
+                  if operation == 'UPLOAD_COPY':
+                      # Persist conservative boundary before native spawn, even if Popen fails.
+                      journal().emit('BOUNDARY', 'BOUNDARY', boundary=True)
+                  try:
+                      process = subprocess.Popen(argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, start_new_session=True)
+                  except BaseException:
+                      raise NativeFailure('CHILD_START_FAILED')
+                  journal_error = None
+                  selector = None
+                  output = bytearray(); error_output = bytearray(); offset = 0
+                  deadline = time.monotonic() + seconds
+                  failure = None
+                  try:
+                      journal().emit(operation, 'CHILD_STARTED', child_spawned=True)
+                      selector = selectors.DefaultSelector()
+                      for stream, kind in [(process.stdout, 'out'), (process.stderr, 'err')]:
+                          os.set_blocking(stream.fileno(), False); selector.register(stream, selectors.EVENT_READ, kind)
+                      if stdin is not None:
+                          os.set_blocking(process.stdin.fileno(), False); selector.register(process.stdin, selectors.EVENT_WRITE, 'in')
+                      while selector.get_map():
+                          left = deadline - time.monotonic()
+                          if left <= 0:
+                              raise NativeFailure('CHILD_DEADLINE')
+                          for key, _ in selector.select(min(left, 0.25)):
+                              if key.data == 'in':
+                                  offset += os.write(key.fileobj.fileno(), stdin[offset:])
+                                  if offset == len(stdin):
+                                      selector.unregister(key.fileobj); key.fileobj.close()
+                              else:
+                                  chunk = os.read(key.fileobj.fileno(), 65536)
+                                  if not chunk:
+                                      selector.unregister(key.fileobj); key.fileobj.close(); continue
+                                  if len(output) + len(error_output) + len(chunk) > 2097152:
+                                      raise NativeFailure('CHILD_OUTPUT_LIMIT')
+                                  (output if key.data == 'out' else error_output).extend(chunk)
+                      process.wait(timeout=max(0.001, deadline - time.monotonic()))
+                  except BaseException as error:
+                      failure = error
+                      try:
+                          os.killpg(process.pid, signal.SIGKILL)
+                      except ProcessLookupError:
+                          pass
+                      try:
+                          process.wait(timeout=2)
+                      except BaseException:
+                          raise NativeFailure('CHILD_CLOSURE_UNVERIFIED')
+                  finally:
+                      if selector is not None:
+                          selector.close()
+                      for stream in [process.stdin, process.stdout, process.stderr]:
+                          if stream is not None and not stream.closed:
+                              stream.close()
+                  journal().emit(operation, 'CHILD_EXIT', return_code=process.returncode,
+                                 child_spawned=True, child_closed=True)
+                  if failure is not None:
+                      raise failure
+                  base.gate(r)
+                  if process.returncode != 0:
+                      raise NativeFailure('NATIVE_SIGNAL' if process.returncode < 0 else tool_text_hint(error_output), process.returncode)
+                  return bytes(output)
+          
+          
+          original_http = base.http
+          
+          
+          def observed_http(path, headers, r, limit=65536):
+              if path.startswith('/token?'):
+                  operation = 'HTTP_TOKEN'
+              elif path == '/v2/' + base.NAME + '/tags/list':
+                  operation = 'HTTP_TAGS'
+              elif path.startswith('/v2/' + base.NAME + '/manifests/'):
+                  operation = 'HTTP_MANIFEST'
+              else:
+                  raise base.Stop('UNEXPECTED_FAILURE')
+              with phase(operation):
+                  result = original_http(path, headers, r, limit)
+                  journal().emit(operation, 'HTTP_RESULT', http_status=result[0])
+                  return result
+          
+          
+          def wrap(function, operation):
+              def wrapped(*args, **kwargs):
+                  with phase(operation):
+                      return function(*args, **kwargs)
+              return wrapped
+          
+          
+          base.child = observed_child
+          base.http = observed_http
+          for name, operation in [('context', 'VALIDATION'), ('prepare', 'PREPARE'),
+              ('bearer_for_read', 'AUTH_READ'), ('check_absent', 'REGISTRY_ABSENCE'),
+              ('remote_manifest', 'MANIFEST_READBACK'), ('pulled_blobs', 'BLOB_VERIFY')]:
+              setattr(base, name, wrap(getattr(base, name), operation))
+          base.cleanup = wrap_cleanup(base.cleanup)
+          
+          
+          def candidate_publish():
+              # Original protocol/argv/guard order retained; finite phases added explicitly.
+              token = None; ram = None; mutated = False; verified = False; cleanup = False
+              try:
+                  r = base.context(); p = base.workspace(); base.verify_archive(p / 'starter-dummy.oci.tar')
+                  with phase('ONE_USE_CLAIM'):
+                      base.need((p / 'one-use.claim').read_text() == os.environ['GITHUB_RUN_ID'], 'CLAIM_BINDING')
+                      with (p / 'publication-consumed.claim').open('x') as f:
+                          f.write(os.environ['GITHUB_RUN_ID']); f.flush(); os.fsync(f.fileno())
+                  import resource
+                  resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+                  token = os.environ.pop('GH_PUBLISH_TOKEN', None)
+                  base.need(type(token) is str and 10 < len(token) < 32768
+                            and not base.re.search(r'[\r\n]', token), 'TOKEN_INPUT')
+                  with phase('AUTH_SETUP'):
+                      os.umask(0o077)
+                      ram = Path(tempfile.mkdtemp(prefix='e6-ghcr-', dir='/dev/shm'))
+                      base.ram_boundary(ram)
+                      (p / 'ram-path').write_text(str(ram))
+                      home = ram / 'home'; home.mkdir(mode=0o700); auth = ram / 'auth.json'
+                      env = {'PATH': '/usr/bin:/bin', 'HOME': str(home), 'XDG_CONFIG_HOME': str(home),
+                             'XDG_RUNTIME_DIR': str(home), 'REGISTRY_AUTH_FILE': str(auth), 'LANG': 'C.UTF-8'}
+                  version = base.child(['/usr/bin/skopeo', '--version'], env, r, seconds=10)
+                  base.need(version == b'skopeo version 1.13.3\n', 'TOOL_VERSION')
+                  base.child(['/usr/bin/skopeo', 'login', '--authfile', str(auth), '--username',
+                              'Eight6Admin', '--password-stdin', '--tls-verify=true', 'ghcr.io'],
+                             env, r, token.encode(), 30)
+                  base.auth_boundary(auth)
+                  bearer = base.bearer_for_read(token, r); token = None
+                  base.check_absent(bearer, r); base.gate(r)
+                  with phase('BOUNDARY'):
+                      mutated = True
+                      journal().emit('BOUNDARY', 'BOUNDARY', boundary=True)
+                      with (p / 'upload-may-have-started.claim').open('x') as f:
+                          f.write(os.environ['GITHUB_RUN_ID']); f.flush(); os.fsync(f.fileno())
+                      print('BOUNDARY=UPLOAD_MAY_BEGIN_ANY_UNVERIFIED_OUTCOME_IS_UNKNOWN', flush=True)
+                  base.child(['/usr/bin/skopeo', 'copy', '--preserve-digests', '--retry-times', '0',
+                              '--dest-tls-verify=true', '--dest-authfile', str(auth), '--digestfile',
+                              str(p / 'uploaded.digest'), 'oci-archive:' + str(p / 'starter-dummy.oci.tar'),
+                              'docker://ghcr.io/' + base.NAME + ':' + r['tag']], env, r, seconds=300)
+                  with phase('UPLOAD_DIGEST'):
+                      base.need((p / 'uploaded.digest').read_text().strip() == base.IMAGE, 'UPLOAD_DIGESTFILE')
+                  base.remote_manifest(bearer, r); bearer = None
+                  base.child(['/usr/bin/skopeo', 'copy', '--preserve-digests', '--retry-times', '0',
+                              '--src-tls-verify=true', '--src-authfile', str(auth),
+                              'docker://ghcr.io/' + base.NAME + '@' + base.IMAGE,
+                              'oci:' + str(p / 'verified-pull') + ':verified'], env, r, seconds=180)
+                  base.pulled_blobs(p / 'verified-pull'); base.gate(r); verified = True
+              finally:
+                  token = None; os.environ.pop('GH_PUBLISH_TOKEN', None)
+                  try:
+                      with unconditional_cleanup():
+                          if ram is not None:
+                              shutil.rmtree(ram)
+                              base.need(not ram.exists(), 'AUTH_CLEANUP_UNVERIFIED')
+                          cleanup = True
+                  finally:
+                      if not (verified and cleanup):
+                          print('OUTCOME=UNKNOWN_NO_RETRY' if mutated else 'OUTCOME=STOP_BEFORE_UPLOAD', flush=True)
+              print('OUTCOME=AUTHENTICATED_MANIFEST_AND_ALL_BLOBS_MATCH_REVIEW_REQUIRED', flush=True)
+              print('CLEANUP=TEMPORARY_AUTH_PATH_REMOVED_NOT_SECURE_ERASURE', flush=True)
+              print('PUBLIC_VISIBILITY=NOT_VERIFIED_SEPARATE_GATE', flush=True)
+          
+          
+          base.publish = wrap(candidate_publish, 'PUBLISH')
+          
+          
+          def run_mode(mode):
+              """Actual instrumented controller, exercised only in isolated dummy fixtures."""
+              if mode not in {'prepare', 'publish', 'cleanup'}:
+                  return 2
+              # Initial telemetry failure must NEVER gate the cleanup body.
+              try:
+                  if mode == 'prepare':
+                      journal().initialize()
+                  initial_count = len(journal().read())
+              except BaseException:
+                  initial_count = None
+              try:
+                  if mode != 'cleanup' and initial_count is None:
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  getattr(base, mode)()
+                  rows = journal().read()
+                  if initial_count is None or len(rows) <= initial_count:
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  if mode == 'publish':
+                      require_publish_success(rows, SAFE_CODES, binding(), initial_count)
+                  elif mode == 'cleanup':
+                      tail = rows[initial_count:]
+                      if [(r['operation'], r['event']) for r in tail] != [('CLEANUP', 'ENTER'), ('CLEANUP', 'EXIT')]:
+                          raise InvalidJournal('JOURNAL_INVALID')
+                  elif ([r['operation'] for r in rows if r['event']=='ENTER'] != ['PREPARE','VALIDATION','LOCAL_SMOKE','BLOB_VERIFY']
+                        or any(r['event']=='FAIL' for r in rows)
+                        or [r['return_code'] for r in rows if r['event']=='CHILD_EXIT'] != [0]
+                        or rows[-1]['operation'] != 'PREPARE' or rows[-1]['event'] != 'EXIT'):
+                      raise InvalidJournal('JOURNAL_INVALID')
+                  return 0
+              except BaseException as error:
+                  # No str/repr/traceback of arbitrary errors or tool output.
+                  try:
+                      rows = journal().read()
+                      claim = Path(os.environ['RUNNER_TEMP']) / 'e6-ghcr-import-02/upload-may-have-started.claim'
+                      possible = (bool(rows and rows[-1]['upload_possible']) or claim.exists()
+                                  or code_for(error) in {'JOURNAL_INVALID', 'CHILD_CLOSURE_UNVERIFIED', 'UNEXPECTED_FAILURE'})
+                      print('FAILURE_CODE=' + code_for(error), flush=True)
+                      print('OUTCOME=UNKNOWN_NO_RETRY' if possible else 'OUTCOME=STOP_BEFORE_UPLOAD', flush=True)
+                  except BaseException:
+                      print('DIAGNOSTIC=UNAVAILABLE_OUTCOME_UNKNOWN_NO_RETRY', flush=True)
+                  print('RESULT=NOT_ACCEPTED_STOP_NO_RETRY', flush=True)
+                  return 2
+              finally:
+                  # Delete the allowed name without reading its value, including failures
+                  # before the publication body. No child inherits this environment entry.
+                  if 'GH_PUBLISH_TOKEN' in os.environ:
+                      del os.environ['GH_PUBLISH_TOKEN']
+          
+          
+          E6_SOURCE_2
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/publisher_candidate.py" | /usr/bin/cut -d ' ' -f 1)" = "ce7a14bd1f55ffdf2ada5baf6dbc1935b354d04f445447b12226e1a20d6b482c"
+      - name: Materialise and verify entry_02.py
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          umask 077
+          cat > "$RUNNER_TEMP/e6-ghcr-02-code/entry_02.py" <<'E6_SOURCE_3'
+          """Inactive workflow candidate loader: separate operational release is mandatory."""
+          import hashlib,importlib.util,json,os,stat,sys
+          from pathlib import Path
+          PINS={'runtime_publisher_02.py': 'AEFFB81E9293F14EC341C49B72C988D0A24C3F41BB313F38B68C0CBB254CCD24', 'diagnostics.py': '903E481D0B3017CF0891893432C895CFD77F614CAD2CF2F39E70B7BAAEB3A54D', 'publisher_candidate.py': 'CE7A14BD1F55FFDF2ADA5BAF6DBC1935B354D04F445447B12226E1A20D6B482C'}
+          root=Path(__file__).resolve().parent
+          try:
+           if sys.argv[1:] not in [['prepare'],['publish'],['cleanup']]:raise ValueError()
+           for name,digest in PINS.items():
+            path=root/name;s=path.lstat()
+            if not stat.S_ISREG(s.st_mode) or s.st_uid!=os.getuid() or s.st_nlink!=1 or path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest().upper()!=digest:raise ValueError()
+           for name in ['diagnostics','publisher_candidate']:
+            spec=importlib.util.spec_from_file_location(name,root/(name+'.py'));module=importlib.util.module_from_spec(spec);sys.modules[name]=module;spec.loader.exec_module(module)
+           c=sys.modules['publisher_candidate']
+           # Context still independently validates new source/release before reading a token.
+           code=c.run_mode(sys.argv[1]);sys.exit(code)
+          except SystemExit:raise
+          except BaseException:
+           if 'GH_PUBLISH_TOKEN' in os.environ:del os.environ['GH_PUBLISH_TOKEN']
+           print('DIAGNOSTIC=LOADER_FAILURE_OUTCOME_UNKNOWN_NO_RETRY',flush=True)
+           sys.exit(2)
+          E6_SOURCE_3
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/entry_02.py" | /usr/bin/cut -d ' ' -f 1)" = "7b473f38983350997aaf75d436f5bc5ae49505fd7cc2844b6f3a612bcce83d91"
+      - name: Validate new authority exact archive and credential-empty native smoke
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          umask 077
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/runtime_publisher_02.py" | /usr/bin/cut -d ' ' -f 1)" = "aeffb81e9293f14ec341c49b72c988d0a24c3f41bb313f38b68c0cbb254ccd24"
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/diagnostics.py" | /usr/bin/cut -d ' ' -f 1)" = "903e481d0b3017cf0891893432c895cfd77f614cad2cf2f39e70b7baaeb3a54d"
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/publisher_candidate.py" | /usr/bin/cut -d ' ' -f 1)" = "ce7a14bd1f55ffdf2ada5baf6dbc1935b354d04f445447b12226e1a20d6b482c"
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/entry_02.py" | /usr/bin/cut -d ' ' -f 1)" = "7b473f38983350997aaf75d436f5bc5ae49505fd7cc2844b6f3a612bcce83d91"
+          exec /usr/bin/python3 -I "$RUNNER_TEMP/e6-ghcr-02-code/entry_02.py" prepare
+      - name: One diagnostic publication and authenticated full readback
+        env:
+          GH_PUBLISH_TOKEN: ${{ github.token }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          umask 077
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/runtime_publisher_02.py" | /usr/bin/cut -d ' ' -f 1)" = "aeffb81e9293f14ec341c49b72c988d0a24c3f41bb313f38b68c0cbb254ccd24"
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/diagnostics.py" | /usr/bin/cut -d ' ' -f 1)" = "903e481d0b3017cf0891893432c895cfd77f614cad2cf2f39e70b7baaeb3a54d"
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/publisher_candidate.py" | /usr/bin/cut -d ' ' -f 1)" = "ce7a14bd1f55ffdf2ada5baf6dbc1935b354d04f445447b12226e1a20d6b482c"
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/entry_02.py" | /usr/bin/cut -d ' ' -f 1)" = "7b473f38983350997aaf75d436f5bc5ae49505fd7cc2844b6f3a612bcce83d91"
+          exec /usr/bin/python3 -I "$RUNNER_TEMP/e6-ghcr-02-code/entry_02.py" publish
+      - name: Always reconcile owned temporary auth cleanup
+        if: ${{ always() }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          umask 077
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/runtime_publisher_02.py" | /usr/bin/cut -d ' ' -f 1)" = "aeffb81e9293f14ec341c49b72c988d0a24c3f41bb313f38b68c0cbb254ccd24"
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/diagnostics.py" | /usr/bin/cut -d ' ' -f 1)" = "903e481d0b3017cf0891893432c895cfd77f614cad2cf2f39e70b7baaeb3a54d"
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/publisher_candidate.py" | /usr/bin/cut -d ' ' -f 1)" = "ce7a14bd1f55ffdf2ada5baf6dbc1935b354d04f445447b12226e1a20d6b482c"
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/e6-ghcr-02-code/entry_02.py" | /usr/bin/cut -d ' ' -f 1)" = "7b473f38983350997aaf75d436f5bc5ae49505fd7cc2844b6f3a612bcce83d91"
+          exec /usr/bin/python3 -I "$RUNNER_TEMP/e6-ghcr-02-code/entry_02.py" cleanup
