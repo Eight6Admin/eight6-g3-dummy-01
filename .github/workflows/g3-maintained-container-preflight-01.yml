@@ -197,7 +197,11 @@ jobs:
             need(int(fields['CapEff'],16)==0 and int(fields['CapBnd'],16)==0 and fields['NoNewPrivs']=='1' and fields['Seccomp']=='2','RUNTIME_SECURITY_BOUNDARY')
             out,_=run_container(work,'hashes',['/usr/bin/skopeo','/etc/containers/policy.json'],runid,'/usr/bin/sha256sum')
             need(out.decode('ascii').splitlines()==['5d976d2f5854ab098bc32bfd9791aae4b22f0c62a5953b007b22e581d0d91a34  /usr/bin/skopeo','cddfaa8e6a7e5497b67cc0dd8e8517058d0c97de91bf46fff867528415f2d946  /etc/containers/policy.json'],'RUNTIME_TOOL_CONTENTS')
-            out,_=run_container(work,'version',['--version'],runid);need(out.strip()==b'skopeo version 1.22.3','RUNTIME_TOOL_VERSION')
+            out,_=run_container(work,'version',['--version'],runid)
+            # Only credential-free pinned --version stdout; lossless hex avoids control characters.
+            print('VERSION_STDOUT='+json.dumps({'stage':'version','stdout_bytes':len(out),'stdout_sha256':hashlib.sha256(out).hexdigest().upper(),'encoding':'hex','stdout_hex':out.hex() if len(out)<=4096 else None,'capture_limit_bytes':4096,'complete':len(out)<=4096},sort_keys=True,separators=(',',':')),flush=True)
+            need(len(out)<=4096,'VERSION_STDOUT_DIAGNOSTIC_BOUND')
+            need(out.strip()==b'skopeo version 1.22.3','RUNTIME_TOOL_VERSION')
             out,_=run_container(work,'flags',['copy','--help'],runid);need(all(x.encode() in out for x in ['--preserve-digests','--retry-times','--src-authfile','--dest-authfile','--src-tls-verify','--dest-tls-verify','--digestfile']),'REQUIRED_COPY_FLAGS')
             run_container(work,'copy',['--policy','/input/policy.json','copy','--preserve-digests','--retry-times','0','--src-authfile','/input/empty.json','--dest-authfile','/input/empty.json','oci-archive:/input/frozen.oci.tar','oci:/output/copied:verified'],runid,seconds=180)
             destination(work/'output/copied');result={'frozen_digest':FROZEN,'exact_blobs':5,'tool_digest':IMAGE,'nonroot_caps0_nnp_seccomp_observed':True,'runner_image_version':os.environ['ImageVersion'],'native_client_version':v['Client']['Version'],'native_server_version':v['Server']['Version']}
@@ -215,7 +219,7 @@ jobs:
            return 0 if status=='PASS' and cleanup else 2
           if __name__=='__main__':sys.exit(main())
           E6_MAINTAINED_PROBE
-          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/maintained_probe.py" | /usr/bin/cut -d ' ' -f 1)" = 'd4666502dd91d8eda0c97d7b685d9b56994accabf57507f3bb176a22d68298af'
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/maintained_probe.py" | /usr/bin/cut -d ' ' -f 1)" = 'd17f99cb44b8fa587c449650aa4e2863b186b34be3f833c47a3a85288fc72d4c'
       - name: One credential-free maintained container observation
         shell: bash
         run: |
