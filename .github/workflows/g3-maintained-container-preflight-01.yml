@@ -1,0 +1,223 @@
+name: G3 maintained Skopeo local copy 01
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: g3-maintained-container-test-01
+  cancel-in-progress: false
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions: {}
+    steps:
+      - name: Materialise exact approved-policy.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          /usr/bin/env -i PATH=/usr/bin:/bin RUNNER_TEMP="$RUNNER_TEMP" /usr/bin/python3 -I - <<'PY'
+          import base64,hashlib,os
+          from pathlib import Path
+          b=base64.b64decode('ewogICAgImRlZmF1bHQiOiBbCiAgICAgICAgewogICAgICAgICAgICAidHlwZSI6ICJpbnNlY3VyZUFjY2VwdEFueXRoaW5nIgogICAgICAgIH0KICAgIF0KfQo=',validate=True)
+          assert hashlib.sha256(b).hexdigest().upper()=='E7B7D97048A60F2E26943F2E307CAA6F2000E5836CC1C7CF48FF74452521F084'
+          p=Path(os.environ['RUNNER_TEMP'])/'approved-policy.json'
+          with p.open('xb') as f:f.write(b)
+          p.chmod(0o400)
+          PY
+      - name: Materialise exact maintained_probe.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > "$RUNNER_TEMP/maintained_probe.py" <<'E6_MAINTAINED_PROBE'
+          """Inactive credential-free test. No publication, credentials or privileged fallback."""
+          import hashlib, json, os, re, selectors, shutil, signal, stat, subprocess, sys
+          import tarfile, tempfile, time, urllib.request, ssl
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          
+          IMAGE='quay.io/skopeo/stable@sha256:dd3929ec029d7122dcfce12b8423425a97f813e51e2d3a9d183a53b634472e2e'
+          CONFIG='sha256:924eb34f210e4a0966ee72eab1b288258e9c760b3b57e81ba84b539451c9aaed'
+          SOURCE='b86020d8c306c4724780adfb6fc492d0a2d9cc48'
+          FROZEN='sha256:ddac54564d21a1cb2519a34c8b79e6de2bdea11536b69add3b136463aea6dd7d'
+          ARCHIVE_SHA='14A1C05B5B243FB523404CBECC7D08725C1C14FC5D491A9BF5E79C420B731BDA'
+          URL='https://github.com/Eight6Admin/eight6-g3-dummy-01/releases/download/g3-dummy-oci-01/starter-dummy.oci.tar'
+          BLOBS={'3707f346abd105dff303edcb9c87b047cdfa398477b99f38ed0824f15d4fec2a':509,'dd051e1b8c92ff101fa3071ab97ea4924885942f15644e01c3dc095764e863e3':28247982,'634001330353172b42cc083a51478b1a55d949986fa9ecd18c24c13bb190d065':58179132,'1809fa5fb190df46a4c3b8af2e403f81c915e219d388b73d0d0f7b19180c4336':3152,FROZEN.split(':')[1]:720}
+          DIFFS=['sha256:f132175cd3dffdfeb6652a011b2c4d11a4e4525723e9d5c21739ca1118bee0ee','sha256:cdabd39f3fb002b1fb0578d483f0a5e8eda000e63f300af678c63850ec285868','sha256:1593aa47e355a64cc97a3833093a4c8d741714aaa7410b51cdf1f5b5cad37fff','sha256:596aa8fabb704e581f1f940caf42461c192bc6ccccf03ed9a452b228c4b772c6','sha256:e2fb21e8e7d77ebf93df11b8caaf6cafca0c88c7ad6afcede7c2af47f8962f64','sha256:ef081f41be6f6d4db845f112ef5d811809558d0a356062d077109d4fd950949e']
+          POLICY_SHA='E7B7D97048A60F2E26943F2E307CAA6F2000E5836CC1C7CF48FF74452521F084'
+          EVENTS=[]
+          ACTIVE=None
+          class Stop(Exception):pass
+          def need(ok,code):
+           if not ok:raise Stop(code)
+          def sha(p):
+           h=hashlib.sha256()
+           with open(p,'rb') as f:
+            for b in iter(lambda:f.read(1048576),b''):h.update(b)
+           return h.hexdigest().upper()
+          def pairs(rows):
+           d={}
+           for k,v in rows:need(k not in d,'DUPLICATE_JSON');d[k]=v
+           return d
+          def loads(raw):return json.loads(raw,object_pairs_hook=pairs)
+          def diagnostics(raw):
+           # Finite classified messages only: never emit arbitrary tool output or argv.
+           text=raw.lower();rules={'PERMISSION_DENIED':[b'permission denied'],'OPERATION_NOT_PERMITTED':[b'operation not permitted'],'NAMESPACE_OR_CHROOT':[b'unshare',b'namespace',b'chroot'],'POLICY_REJECTION':[b'rejected by policy',b'source image rejected'],'MISSING_FILE':[b'no such file',b'not found'],'INVALID_IMAGE':[b'invalid image',b'invalid manifest',b'invalid tar',b'unrecognized image'],'DIGEST_MISMATCH':[b'digest mismatch',b'digest verification failed'],'UNSUPPORTED_FLAG':[b'unknown flag',b'unknown shorthand flag'],'READ_ONLY_FILESYSTEM':[b'read-only file system'],'RESOURCE_LIMIT':[b'out of memory',b'no space left',b'cannot allocate memory'],'NETWORK_OR_TLS':[b'connection refused',b'network is unreachable',b'certificate',b'tls handshake'],'AUTH_OR_RATE_LIMIT':[b'unauthorized',b'denied:',b'too many requests'],'EXEC_OR_RUNTIME':[b'exec format',b'oci runtime',b'failed to create task']}
+           return [name for name,patterns in rules.items() if any(x in text for x in patterns)] or ['UNCLASSIFIED_NATIVE_FAILURE']
+          def error_words(raw):
+           allowed=set('error fatal failed initializing opening source destination reading writing read write extract untar chroot unshare namespace permission denied operation not permitted no such file directory invalid manifest blob digest policy rejected unsupported flag runtime exec format filesystem only memory space allocate authfile mkdir stat tmp tar create certificate tls network connection refused seccomp eacces eperm enoent enospc einval'.split())
+           return [w for w in re.findall(rb'[a-z]+',raw.lower()) if w.decode('ascii') in allowed][:80]
+          def child(argv,home,stage,seconds=45,required=True):
+           global ACTIVE
+           env={'PATH':'/usr/bin:/bin','HOME':str(home),'LANG':'C.UTF-8','LC_ALL':'C.UTF-8'}
+           p=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,start_new_session=True,close_fds=True);ACTIVE=p
+           streams={p.stdout:bytearray(),p.stderr:bytearray()};end=time.monotonic()+seconds;failure=None
+           try:
+            with selectors.DefaultSelector() as sel:
+             for f in streams:os.set_blocking(f.fileno(),False);sel.register(f,selectors.EVENT_READ)
+             while sel.get_map():
+              need(time.monotonic()<end,'CHILD_DEADLINE')
+              for key,_ in sel.select(.1):
+               b=os.read(key.fd,65536)
+               if b:
+                streams[key.fileobj].extend(b);need(sum(map(len,streams.values()))<=2097152,'CHILD_OUTPUT_BOUND')
+               else:sel.unregister(key.fileobj)
+             rc=p.wait(timeout=max(.01,end-time.monotonic()))
+            out,err=bytes(streams[p.stdout]),bytes(streams[p.stderr])
+            event={'stage':stage,'exit':rc,'stdout_bytes':len(out),'stderr_bytes':len(err),'stderr_sha256':hashlib.sha256(err).hexdigest().upper(),'error_categories':diagnostics(err+out) if rc else [],'error_words':[w.decode('ascii') for w in error_words(err)] if rc else [],'raw_output_not_logged':True}
+            EVENTS.append(event)
+            if required:need(rc==0,'NATIVE_NONZERO_'+stage)
+            return rc,out,err
+           except BaseException as e:failure=e;raise
+           finally:
+            try:os.killpg(p.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+            p.wait(timeout=5);p.stdout.close();p.stderr.close();ACTIVE=None
+            if failure and (not EVENTS or EVENTS[-1]['stage']!=stage):EVENTS.append({'stage':stage,'exit':p.returncode,'error_categories':['DEADLINE_OR_OUTPUT_OR_INTERRUPTION'],'raw_output_not_logged':True})
+          class Redirect(urllib.request.HTTPRedirectHandler):
+           def redirect_request(self,req,fp,code,msg,headers,url):
+            u=urlsplit(url);need(u.scheme=='https' and u.hostname in {'github.com','release-assets.githubusercontent.com','objects.githubusercontent.com'} and not u.username and not u.password and u.port in (None,443),'ASSET_REDIRECT')
+            return super().redirect_request(req,fp,code,msg,headers,url)
+          def download(path):
+           op=urllib.request.build_opener(urllib.request.ProxyHandler({}),Redirect(),urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+           old=signal.signal(signal.SIGALRM,lambda *_:(_ for _ in ()).throw(Stop('DOWNLOAD_DEADLINE')));signal.setitimer(signal.ITIMER_REAL,210)
+           try:
+            with op.open(URL,timeout=20) as r,path.open('xb') as f:
+             need(r.status==200,'ASSET_STATUS');n=0
+             for b in iter(lambda:r.read(1048576),b''):n+=len(b);need(n<=86446080,'ASSET_OVERSIZE');f.write(b)
+            need(n==86446080 and sha(path)==ARCHIVE_SHA,'ASSET_BYTES')
+           finally:signal.setitimer(signal.ITIMER_REAL,0);signal.signal(signal.SIGALRM,old)
+          def source_archive(path):
+           need(path.stat().st_size==86446080 and sha(path)==ARCHIVE_SHA,'ARCHIVE_BYTES')
+           with tarfile.open(path,'r:') as t:
+            rows=t.getmembers();want={'oci-layout','index.json'}|{'blobs/sha256/'+d for d in BLOBS}
+            need(len(rows)==len(want) and {m.name for m in rows}==want and all(m.isfile() for m in rows),'ARCHIVE_INVENTORY')
+            idx=loads(t.extractfile('index.json').read());need(len(idx['manifests'])==1 and idx['manifests'][0]['digest']==FROZEN,'SOURCE_INDEX')
+            for d,size in BLOBS.items():
+             b=t.extractfile('blobs/sha256/'+d).read(size+1);need(len(b)==size and hashlib.sha256(b).hexdigest()==d,'SOURCE_BLOB')
+          def destination(path):
+           idx=loads((path/'index.json').read_bytes());need(len(idx['manifests'])==1 and idx['manifests'][0]['digest']==FROZEN,'DEST_INDEX')
+           b=path/'blobs/sha256';need({p.name for p in b.iterdir()}==set(BLOBS),'DEST_INVENTORY')
+           for d,size in BLOBS.items():
+            p=b/d;need(p.is_file() and not p.is_symlink() and p.stat().st_size==size and sha(p).lower()==d,'DEST_BLOB')
+          def context(e):
+           expected={'GITHUB_REPOSITORY':'Eight6Admin/eight6-g3-dummy-01','GITHUB_ACTOR':'Eight6Admin','GITHUB_REF':'refs/heads/main','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_NUMBER':'1','GITHUB_RUN_ATTEMPT':'1','RUNNER_OS':'Linux','RUNNER_ARCH':'X64'}
+           need(all(e.get(k)==v for k,v in expected.items()),'CONTEXT_OR_CONSUMED')
+           need(re.fullmatch('[0-9a-f]{40}',e.get('GITHUB_SHA','')) is not None and e.get('GITHUB_WORKFLOW_SHA')==e['GITHUB_SHA'],'SOURCE_REVISION')
+           need(re.fullmatch('[0-9]+',e.get('GITHUB_RUN_ID','')) is not None,'RUN_ID')
+           need(re.fullmatch('[0-9.]{1,40}',e.get('ImageVersion','')) is not None,'RUNNER_IMAGE_METADATA')
+          def docker_base(work):return ['/usr/bin/docker','--host','unix:///var/run/docker.sock','--config',str(work/'home/docker')]
+          def docker(work,args,stage,seconds=45,required=True):return child(docker_base(work)+args,work/'home',stage,seconds,required)
+          def image_identity(row):
+           need(row['Id']==CONFIG and row['Os']=='linux' and row['Architecture']=='amd64','TOOL_IMAGE_IDENTITY')
+           need(IMAGE in row.get('RepoDigests',[]) and row['RootFS']['Layers']==DIFFS,'TOOL_IMAGE_LAYERS')
+           c=row['Config'];need(c['Entrypoint']==['/usr/bin/skopeo'] and not c.get('Volumes'),'TOOL_IMAGE_ENTRYPOINT')
+           need(c['Labels']['org.opencontainers.image.revision']==SOURCE and c['Labels']['org.opencontainers.image.version']=='1.22.3','TOOL_IMAGE_SOURCE_VERSION')
+          def container_identity(row,work,stage,runid,uid,gid):
+           h=row['HostConfig'];c=row['Config'];labels=c['Labels']
+           need(row['Image']==CONFIG and row['Name']=='/e6-maintained-'+runid+'-'+stage,'CONTAINER_IDENTITY')
+           need(labels.get('eight6.probe.run')==runid and labels.get('eight6.probe.stage')==stage,'CONTAINER_LABELS')
+           need(c['User']==str(uid)+':'+str(gid) and uid>0,'NONROOT_USER')
+           need(h['Privileged'] is False and h['ReadonlyRootfs'] is True and h['NetworkMode']=='none' and h.get('PidMode','')!='host' and h.get('IpcMode')=='private','CONTAINER_ISOLATION')
+           need(h.get('CapDrop')==['ALL'] and not h.get('CapAdd') and not h.get('Devices') and not h.get('DeviceRequests'),'CAPABILITIES_DEVICES')
+           opts=h.get('SecurityOpt') or [];need('no-new-privileges:true' in opts and not any('unconfined' in x for x in opts),'SECURITY_OPTIONS')
+           need(h.get('Memory')==1073741824 and h.get('NanoCpus')==1000000000 and h.get('PidsLimit')==64,'RESOURCE_LIMITS')
+           mounts={x['Destination']:x for x in row['Mounts']};need(len(mounts)==len(row['Mounts']) and set(mounts) in ({'/input','/output'},{'/input','/output','/tmp'}),'MOUNT_INVENTORY')
+           if '/tmp' in mounts:need(mounts['/tmp']['Type']=='tmpfs' and mounts['/tmp']['RW'] is True and not mounts['/tmp'].get('Source'),'TMPFS_MOUNT_BOUNDARY')
+           for dest,src,rw in [('/input',work/'input',False),('/output',work/'output',True)]:
+            x=mounts[dest];need(x['Type']=='bind' and Path(x['Source'])==src and x['RW'] is rw,'MOUNT_BOUNDARY')
+           need(h.get('Tmpfs')=={'/tmp':'rw,nosuid,nodev,noexec,size=128m,mode=1777'},'TMPFS_INVENTORY')
+           need(not any('docker.sock' in x.get('Source','') for x in row['Mounts']),'NO_SOCKET_MOUNT')
+          def run_container(work,stage,args,runid,entrypoint=None,seconds=60):
+           uid,gid=os.getuid(),os.getgid();need(uid>0,'NONROOT_HOST_REQUIRED')
+           name='e6-maintained-'+runid+'-'+stage;cidfile=work/(stage+'.cid')
+           cmd=['create','--pull','never','--platform','linux/amd64','--name',name,'--cidfile',str(cidfile),'--label','eight6.probe.run='+runid,'--label','eight6.probe.stage='+stage,'--user',str(uid)+':'+str(gid),'--cap-drop','ALL','--security-opt','no-new-privileges:true','--read-only','--network','none','--ipc','private','--pids-limit','64','--memory','1g','--cpus','1','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777','--mount','type=bind,src='+str(work/'input')+',dst=/input,readonly','--mount','type=bind,src='+str(work/'output')+',dst=/output','--env','HOME=/tmp','--env','XDG_CONFIG_HOME=/tmp','--env','XDG_RUNTIME_DIR=/tmp','--env','REGISTRY_AUTH_FILE=/input/empty.json']
+           if entrypoint:cmd+=['--entrypoint',entrypoint]
+           _,out,_=docker(work,cmd+[IMAGE]+args,'CREATE_'+stage)
+           cid=out.decode('ascii').strip();need(re.fullmatch('[0-9a-f]{64}',cid) is not None and cidfile.read_text().strip()==cid,'CID_BINDING')
+           _,out,_=docker(work,['inspect',cid],'INSPECT_'+stage);rows=loads(out);need(len(rows)==1,'CONTAINER_SHAPE');container_identity(rows[0],work,stage,runid,uid,gid)
+           _,out,err=docker(work,['start','--attach',cid],'RUN_'+stage,seconds)
+           _,state,_=docker(work,['inspect',cid],'POST_'+stage);row=loads(state)[0];need(not row['State']['Running'] and row['State']['ExitCode']==0 and not row['State'].get('OOMKilled'),'CONTAINER_EXIT')
+           docker(work,['rm',cid],'REMOVE_'+stage)
+           return out,err
+          def inventory(work,runid):
+           _,out,_=docker(work,['ps','--all','--quiet','--no-trunc','--filter','label=eight6.probe.run='+runid],'OWNED_CONTAINER_INVENTORY')
+           ids=out.decode('ascii').split();need(all(re.fullmatch('[0-9a-f]{64}',x) for x in ids),'INVENTORY_SHAPE');return ids
+          def cleanup_containers(work,runid):
+           for cid in inventory(work,runid):
+            _,out,_=docker(work,['inspect',cid],'CLEANUP_INSPECT');row=loads(out)[0]
+            stage=row['Config']['Labels'].get('eight6.probe.stage');need(stage in {'boundary','hashes','version','flags','copy'},'UNOWNED_CONTAINER_STOP')
+            need(row['Name']=='/e6-maintained-'+runid+'-'+stage and row['Image']==CONFIG,'CLEANUP_IDENTITY')
+            need((work/(stage+'.cid')).read_text().strip()==cid,'CLEANUP_CID_PROVENANCE')
+            docker(work,['rm','--force',cid],'CLEANUP_REMOVE')
+           need(not inventory(work,runid),'CONTAINER_CLEANUP_UNPROVEN')
+          def main():
+           work=None;dirty=False;cleanup=False;status='STOP';code='UNEXPECTED_LOCAL_FAILURE';result=None;runid=None
+           try:
+            need(sys.platform=='linux','LINUX_REQUIRED');context(os.environ);runid=os.environ['GITHUB_RUN_ID']
+            need(os.getuid()>0,'NONROOT_HOST_REQUIRED')
+            os.umask(0o077);work=Path(tempfile.mkdtemp(prefix='e6-maintained-',dir=os.environ['RUNNER_TEMP']))
+            need(work.is_absolute() and ',' not in str(work) and not work.is_symlink(),'WORK_PATH')
+            for name in ['home','home/docker','input','output']:(work/name).mkdir(mode=0o700)
+            (work/'home/docker/config.json').write_text('{"auths":{}}');(work/'input/empty.json').write_text('{"auths":{}}')
+            policy=Path(__file__).with_name('approved-policy.json');need(sha(policy)==POLICY_SHA,'APPROVED_POLICY_BYTES');shutil.copyfile(policy,work/'input/policy.json')
+            (work/'one-use.claim').write_text(runid)
+            _,raw,_=docker(work,['version','--format','{{json .}}'],'DOCKER_VERSION');v=loads(raw);need(v['Server']['Os']=='linux' and v['Server']['Arch']=='amd64','DOCKER_PLATFORM')
+            _,raw,_=docker(work,['info','--format','{{json .SecurityOptions}}'],'DOCKER_SECURITY');need(any('seccomp' in x and 'builtin' in x for x in loads(raw)),'DEFAULT_SECCOMP_REQUIRED')
+            need(not inventory(work,runid),'PREEXISTING_OWNED_CONTAINER_STOP')
+            docker(work,['pull','--platform','linux/amd64',IMAGE],'ANONYMOUS_QUAY_PULL',180)
+            _,raw,_=docker(work,['image','inspect',IMAGE],'IMAGE_INSPECT');rows=loads(raw);need(len(rows)==1,'IMAGE_SHAPE');image_identity(rows[0])
+            archive=work/'input/frozen.oci.tar';download(archive);source_archive(archive)
+            for p in (work/'input').iterdir():p.chmod(0o400)
+            dirty=True
+            out,_=run_container(work,'boundary',['/proc/self/status'],runid,'/usr/bin/cat')
+            fields={line.split(':',1)[0]:line.split(':',1)[1].strip() for line in out.decode('ascii').splitlines() if ':' in line}
+            need(fields['Uid'].split()==[str(os.getuid())]*4 and fields['Gid'].split()==[str(os.getgid())]*4,'RUNTIME_UID_GID')
+            need(int(fields['CapEff'],16)==0 and int(fields['CapBnd'],16)==0 and fields['NoNewPrivs']=='1' and fields['Seccomp']=='2','RUNTIME_SECURITY_BOUNDARY')
+            out,_=run_container(work,'hashes',['/usr/bin/skopeo','/etc/containers/policy.json'],runid,'/usr/bin/sha256sum')
+            need(out.decode('ascii').splitlines()==['5d976d2f5854ab098bc32bfd9791aae4b22f0c62a5953b007b22e581d0d91a34  /usr/bin/skopeo','cddfaa8e6a7e5497b67cc0dd8e8517058d0c97de91bf46fff867528415f2d946  /etc/containers/policy.json'],'RUNTIME_TOOL_CONTENTS')
+            out,_=run_container(work,'version',['--version'],runid);need(out.strip()==b'skopeo version 1.22.3','RUNTIME_TOOL_VERSION')
+            out,_=run_container(work,'flags',['copy','--help'],runid);need(all(x.encode() in out for x in ['--preserve-digests','--retry-times','--src-authfile','--dest-authfile','--src-tls-verify','--dest-tls-verify','--digestfile']),'REQUIRED_COPY_FLAGS')
+            run_container(work,'copy',['--policy','/input/policy.json','copy','--preserve-digests','--retry-times','0','--src-authfile','/input/empty.json','--dest-authfile','/input/empty.json','oci-archive:/input/frozen.oci.tar','oci:/output/copied:verified'],runid,seconds=180)
+            destination(work/'output/copied');result={'frozen_digest':FROZEN,'exact_blobs':5,'tool_digest':IMAGE,'nonroot_caps0_nnp_seccomp_observed':True,'runner_image_version':os.environ['ImageVersion'],'native_client_version':v['Client']['Version'],'native_server_version':v['Server']['Version']}
+            status,code='PASS','MAINTAINED_LOCAL_COPY_REVIEW_REQUIRED'
+           except Stop as e:code=str(e)
+           except BaseException:code='UNEXPECTED_OR_INTERRUPTED_STOP'
+           finally:
+            if work is not None:
+             try:
+              if dirty:cleanup_containers(work,runid)
+              shutil.rmtree(work);cleanup=not work.exists();need(cleanup,'OWNED_FILES_REMAIN')
+             except BaseException:status,code='UNKNOWN','OWNED_CLEANUP_UNVERIFIED_NO_RETRY'
+            else:cleanup=True
+            print('MAINTAINED_RESULT='+json.dumps({'status':status,'code':code,'result':result,'events':EVENTS,'owned_cleanup_verified':cleanup,'no_workflow_or_copy_retry':True,'no_GHCR_or_publishing_credential_use':True,'scope':'Candidate credential-free compatibility only; not a publishing/security baseline acceptance'},sort_keys=True,separators=(',',':')),flush=True)
+           return 0 if status=='PASS' and cleanup else 2
+          if __name__=='__main__':sys.exit(main())
+          E6_MAINTAINED_PROBE
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/maintained_probe.py" | /usr/bin/cut -d ' ' -f 1)" = 'd4666502dd91d8eda0c97d7b685d9b56994accabf57507f3bb176a22d68298af'
+      - name: One credential-free maintained container observation
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/env -i PATH=/usr/bin:/bin GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_ACTOR="$GITHUB_ACTOR" GITHUB_REF="$GITHUB_REF" GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_NUMBER="$GITHUB_RUN_NUMBER" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_SHA="$GITHUB_SHA" GITHUB_WORKFLOW_SHA="$GITHUB_WORKFLOW_SHA" GITHUB_RUN_ID="$GITHUB_RUN_ID" RUNNER_OS="$RUNNER_OS" RUNNER_ARCH="$RUNNER_ARCH" RUNNER_TEMP="$RUNNER_TEMP" ImageVersion="$ImageVersion" /usr/bin/python3 -I "$RUNNER_TEMP/maintained_probe.py"
