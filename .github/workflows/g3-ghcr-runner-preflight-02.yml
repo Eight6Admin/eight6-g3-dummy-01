@@ -1,0 +1,114 @@
+# INACTIVE REVIEW CANDIDATE. NO INSTALLATION OR EXECUTION AUTHORISED.
+name: G3 credential-free runner preflight 02
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: g3-credential-free-runner-preflight-02
+  cancel-in-progress: false
+jobs:
+  metadata:
+    if: >-
+      github.repository == 'Eight6Admin/eight6-g3-dummy-01' &&
+      github.actor == 'Eight6Admin' && github.ref == 'refs/heads/main' &&
+      github.run_number == 1 && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Inspect only fixed non-secret runner metadata without registry access
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set +x
+          umask 077
+          cat > "$RUNNER_TEMP/g3-runner-preflight-02.py" <<'E6_PREFLIGHT_02'
+          """INACTIVE credential-free metadata probe; no registry or application access."""
+          import datetime,hashlib,json,os,re,stat,subprocess,sys
+          from pathlib import Path
+          TOOLS={'/usr/bin/skopeo': '1802F4706BB0F3F5A7A43E61C6ECEF2ADCFFF567D454EB0052AEB5769885302C', '/usr/bin/python3': 'E50D468E8B0ADFB05733F5B87B3CFF34829C4A8C1AEA50C865AA8BDFE4BB150F', '/usr/bin/bash': 'BC5945FEB8BD26203EBFAFEA5CE1878BB2E32CB8FB50AB7AE395CFB1E1AAAEF1', '/usr/bin/curl': '1CCBD3DAE948374BA8EEF1EBDA26C64B783EDE50B463196E53666E0880BDAC60'}
+          FIXTURE_DEPENDENCIES={'/lib/x86_64-linux-gnu/libgpgme.so.11': 'A5B16B01E5A7BEBBE80CA228D021FA117E4D982226381312218BA47C9F12BED1', '/lib/x86_64-linux-gnu/libsqlite3.so.0': 'C9126B7CE030C80B10FA44C282463E125E1072B49A962F225A82104EC2BAD838', '/lib/x86_64-linux-gnu/libdevmapper.so.1.02.1': '0B33F9E9780B2E22BD40170F4CFE358B0CF525974D01896B3BB2B02D6E4E2582', '/lib/x86_64-linux-gnu/libc.so.6': '3A15D66867D83762C7F2F1E37359CB8F6C5743EDB369C65285CB0B1C4F7498BF', '/lib/x86_64-linux-gnu/libassuan.so.0': 'AE80D8E06D17CD95D654DA3DD52F3A63AD241EA5FC001FA2F52ADA5E640CFDD8', '/lib/x86_64-linux-gnu/libgpg-error.so.0': '6CB18A007BFCB623029F4528A36B46578FEA7DC34C2B505B8E6E0D99E6348CD1', '/lib64/ld-linux-x86-64.so.2': 'C20A2DC8917C755F02B94049356320FE1F62AC7D9F8994731F807D9DF39302DA', '/lib/x86_64-linux-gnu/libm.so.6': 'FCE00B6F25F459CF4AE0B7FAE4257909A1A8A86F9149E7C029A5D617BAF1CCD0', '/lib/x86_64-linux-gnu/libselinux.so.1': '0EC0843463F90E227B0E138E1F379774F50B5514BD7F5DBD4C8A87ACA0AA6670', '/lib/x86_64-linux-gnu/libudev.so.1': '0D6934ADAFB2EF3C640382440C14D6BD60F391E688C000796FFCEA0C72849269', '/lib/x86_64-linux-gnu/libpcre2-8.so.0': '6075A70C30FD7216B9214AE50F2DEF0CE835092B034088ED9BD64C6A376C740F', '/lib/x86_64-linux-gnu/libcap.so.2': '6AC6ABC86AC891C6E13486470E26F1D939F47FDA9E6B5D5508A7F5EC881ADC84'}
+          POLICY='/etc/containers/policy.json'
+          POLICY_FIXTURE_SHA256='E7B7D97048A60F2E26943F2E307CAA6F2000E5836CC1C7CF48FF74452521F084'
+          IMAGE_VERSION='20261101.360.1'
+          PUBLICATION_WORKFLOW_SHA256='5859567D687F177EADF83265C28553DFA23995825C682C0A7431307AF9E7DFFF'
+          CONTEXT={'GITHUB_REPOSITORY':'Eight6Admin/eight6-g3-dummy-01','GITHUB_ACTOR':'Eight6Admin','GITHUB_REF':'refs/heads/main','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_NUMBER':'1','GITHUB_RUN_ATTEMPT':'1','RUNNER_OS':'Linux','RUNNER_ARCH':'X64'}
+          FLAGS=['--preserve-digests','--retry-times','--src-authfile','--dest-authfile','--src-tls-verify','--dest-tls-verify','--digestfile']
+          class ProbeStop(Exception):pass
+          
+          def file_hash(name):
+           # Only fixed approved non-secret paths; never inspect credential/env/cache paths.
+           if name not in TOOLS and name not in FIXTURE_DEPENDENCIES and name!=POLICY:raise ProbeStop()
+           path=Path(name);resolved=path.resolve(strict=True)
+           if name==POLICY:
+            if str(resolved)!=POLICY:raise ProbeStop()
+           elif not str(resolved).startswith(('/usr/bin/','/usr/lib/','/lib/','/lib64/')):raise ProbeStop()
+           info=resolved.stat()
+           if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022 or info.st_size>134217728:raise ProbeStop()
+           h=hashlib.sha256()
+           with resolved.open('rb') as stream:
+            for chunk in iter(lambda:stream.read(1048576),b''):h.update(chunk)
+           return h.hexdigest().upper()
+          
+          def command(argv):
+           # A command is run only after its executable matches the accepted exact hash.
+           allowed=[[path,'--version'] for path in TOOLS]+[['/usr/bin/skopeo','copy','--help']]
+           if argv not in allowed or file_hash(argv[0])!=TOOLS[argv[0]]:return None
+           try:
+            r=subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+              env={'PATH':'/usr/bin:/bin','HOME':'/nonexistent','LANG':'C.UTF-8'},timeout=8,check=False)
+            if r.returncode!=0 or r.stderr or len(r.stdout)>32768:return None
+            return r.stdout
+           except (OSError,subprocess.TimeoutExpired):return None
+          
+          def observed_file(path,expected):
+           try:
+            value=file_hash(path)
+            return {'path':path,'sha256':value,'comparison':'MATCH' if value==expected else 'DIFFERENT_REVIEW_REQUIRED'}
+           except (OSError,ProbeStop):return {'path':path,'sha256':None,'comparison':'MISSING_OR_UNSAFE_STOP'}
+          
+          def collect():
+           # Read only named public platform fields. Never enumerate/read token/secret env.
+           context={key:os.environ.get(key)==value for key,value in CONTEXT.items()}
+           raw_image=os.environ.get('ImageVersion','')
+           image=raw_image if re.fullmatch(r'[0-9.]{1,40}',raw_image) else None
+           result={'schema':1,'observation_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+             'context_matches':context,'runner_image':image,'runner_image_match':image==IMAGE_VERSION,
+             'reference_publication_workflow_sha256':PUBLICATION_WORKFLOW_SHA256,
+             'tools':[],'dependencies':[],'policy':None,'copy_flags':{},
+             'no_registry_or_token_use':True,'current_dependency_graph_proven':False,
+             'scope':'Named non-secret file metadata/version/help only. Dependency/policy hashes compare a labelled Linux fixture, not historical-host identity. Workflow02 still requires credential-empty native local OCI smoke before token use.'}
+           if not all(context.values()):result['status']='STOP_CONTEXT';return result
+           patterns={'/usr/bin/skopeo':rb'^skopeo version ([0-9]+\.[0-9]+\.[0-9]+)\n$',
+             '/usr/bin/python3':rb'^Python ([0-9]+\.[0-9]+\.[0-9]+)\n$',
+             '/usr/bin/bash':rb'^GNU bash, version ([0-9]+\.[0-9]+\.[0-9]+)',
+             '/usr/bin/curl':rb'^curl ([0-9]+\.[0-9]+\.[0-9]+)'}
+           for path,expected in TOOLS.items():
+            row=observed_file(path,expected);row['version']=None;row['version_status']='NOT_EXECUTED'
+            if row['comparison']=='MATCH':
+             raw=command([path,'--version']);match=re.match(patterns[path],raw or b'')
+             if match and len(match.group(1))<=24:
+              row['version']=match.group(1).decode('ascii');row['version_status']='PARSED'
+             else:row['version_status']='FAILED_OR_MALFORMED_STOP'
+            result['tools'].append(row)
+           if result['tools'][0]['comparison']=='MATCH':
+            raw=command(['/usr/bin/skopeo','copy','--help'])
+            result['copy_flags']={flag:bool(raw and flag.encode() in raw) for flag in FLAGS}
+           for path,expected in FIXTURE_DEPENDENCIES.items():result['dependencies'].append(observed_file(path,expected))
+           result['policy']=observed_file(POLICY,POLICY_FIXTURE_SHA256)
+           tool_ok=all(r['comparison']=='MATCH' and r['version_status']=='PARSED' for r in result['tools'])
+           skopeo_ok=result['tools'][0]['version']=='1.13.3'
+           if not (result['runner_image_match'] and tool_ok and skopeo_ok and len(result['copy_flags'])==len(FLAGS) and all(result['copy_flags'].values())):result['status']='STOP_RUNTIME_COMPATIBILITY'
+           elif any(r['comparison']=='MISSING_OR_UNSAFE_STOP' for r in result['dependencies']+[result['policy']]):result['status']='STOP_DEPENDENCY_POLICY'
+           elif any(r['comparison']!='MATCH' for r in result['dependencies']+[result['policy']]):result['status']='REVIEW_REQUIRED_DEPENDENCY_POLICY'
+           else:result['status']='RUNNER_METADATA_MATCH_REVIEW_REQUIRED'
+           return result
+          
+          def main():
+           try:result=collect()
+           except BaseException:result={'schema':1,'status':'STOP_UNEXPECTED_LOCAL_FAILURE','raw_error_not_output':True}
+           print('G3_PREFLIGHT='+json.dumps(result,separators=(',',':'),ensure_ascii=True),flush=True)
+           return 0 if result['status']=='RUNNER_METADATA_MATCH_REVIEW_REQUIRED' else 2
+          if __name__=='__main__':sys.exit(main())
+          E6_PREFLIGHT_02
+          test "$(/usr/bin/sha256sum "$RUNNER_TEMP/g3-runner-preflight-02.py" | /usr/bin/cut -d ' ' -f 1)" = "dea76fca9f243d9f01d05388b9b5c6759a9607e1ec5c94ab9d0efedfddfe7047"
+          exec /usr/bin/python3 -I "$RUNNER_TEMP/g3-runner-preflight-02.py"
